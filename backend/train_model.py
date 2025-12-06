@@ -114,9 +114,15 @@ def prepare_features(df):
     
     X = df[feature_cols].copy()
     
-    # Target: predict baggage_weight_kg (which is a function of passenger_count)
+    # Target 1: predict baggage_weight_kg (which is a function of passenger_count)
     # Baggage is primarily determined by passenger count
     y_baggage = df['baggage_weight_kg'].values
+    
+    # Target 2: predict cargo demand (actual cargo weight)
+    y_cargo_demand = df['gross_weight_cargo_kg'].values
+    
+    # Target 3: predict cargo volume demand
+    y_cargo_volume = df['gross_volume_cargo_m3'].values
     
     # Calculate remaining cargo capacity
     # Formula: capacity = min(max_weight, max_volume) - (baggage + cargo)
@@ -180,7 +186,7 @@ def prepare_features(df):
     y_remaining = np.minimum(remaining_weight_capacity, remaining_volume_as_weight).values
     y_remaining = np.clip(y_remaining, 0, None)  # Ensure non-negative
     
-    return X, y_baggage, y_remaining, feature_cols
+    return X, y_baggage, y_cargo_demand, y_cargo_volume, y_remaining, feature_cols
 
 def train_base_models(X_train, y_train, X_test, y_test, model_name="baggage"):
     """Train individual base models and return their predictions."""
@@ -354,13 +360,19 @@ def create_weighted_ensemble(models, predictions, scores):
     
     return weights
 
-def train_model(X, y_baggage, y_remaining, feature_cols):
-    """Train ensemble models for baggage and remaining cargo prediction."""
+def train_model(X, y_baggage, y_cargo_demand, y_cargo_volume, y_remaining, feature_cols):
+    """Train ensemble models for baggage, cargo demand, and remaining cargo prediction."""
     print("\n=== Model Training (Ensemble) ===")
     
     # Split data
     X_train, X_test, y_baggage_train, y_baggage_test = train_test_split(
         X, y_baggage, test_size=0.2, random_state=42
+    )
+    _, _, y_cargo_demand_train, y_cargo_demand_test = train_test_split(
+        X, y_cargo_demand, test_size=0.2, random_state=42
+    )
+    _, _, y_cargo_volume_train, y_cargo_volume_test = train_test_split(
+        X, y_cargo_volume, test_size=0.2, random_state=42
     )
     _, _, y_remaining_train, y_remaining_test = train_test_split(
         X, y_remaining, test_size=0.2, random_state=42
@@ -374,6 +386,16 @@ def train_model(X, y_baggage, y_remaining, feature_cols):
         X_train, y_baggage_train, X_test, y_baggage_test, "baggage"
     )
     
+    # Train base models for cargo demand
+    models_cargo_demand, preds_cargo_demand, scores_cargo_demand = train_base_models(
+        X_train, y_cargo_demand_train, X_test, y_cargo_demand_test, "cargo_demand"
+    )
+    
+    # Train base models for cargo volume
+    models_cargo_volume, preds_cargo_volume, scores_cargo_volume = train_base_models(
+        X_train, y_cargo_volume_train, X_test, y_cargo_volume_test, "cargo_volume"
+    )
+    
     # Train base models for remaining cargo
     models_remaining, preds_remaining, scores_remaining = train_base_models(
         X_train, y_remaining_train, X_test, y_remaining_test, "remaining_cargo"
@@ -381,6 +403,8 @@ def train_model(X, y_baggage, y_remaining, feature_cols):
     
     # Create weighted ensembles
     weights_baggage = create_weighted_ensemble(models_baggage, preds_baggage, scores_baggage)
+    weights_cargo_demand = create_weighted_ensemble(models_cargo_demand, preds_cargo_demand, scores_cargo_demand)
+    weights_cargo_volume = create_weighted_ensemble(models_cargo_volume, preds_cargo_volume, scores_cargo_volume)
     weights_remaining = create_weighted_ensemble(models_remaining, preds_remaining, scores_remaining)
     
     # Evaluate ensemble predictions
@@ -395,6 +419,26 @@ def train_model(X, y_baggage, y_remaining, feature_cols):
     print(f"  MAE: {mean_absolute_error(y_baggage_test, ensemble_pred_baggage):.2f} kg")
     print(f"  RMSE: {np.sqrt(mean_squared_error(y_baggage_test, ensemble_pred_baggage)):.2f} kg")
     print(f"  R²: {r2_score(y_baggage_test, ensemble_pred_baggage):.4f}")
+    
+    # Cargo demand ensemble prediction
+    ensemble_pred_cargo_demand = np.zeros(len(y_cargo_demand_test))
+    for model_name, pred in preds_cargo_demand.items():
+        ensemble_pred_cargo_demand += weights_cargo_demand[model_name] * pred
+    
+    print(f"\nCargo Demand Ensemble:")
+    print(f"  MAE: {mean_absolute_error(y_cargo_demand_test, ensemble_pred_cargo_demand):.2f} kg")
+    print(f"  RMSE: {np.sqrt(mean_squared_error(y_cargo_demand_test, ensemble_pred_cargo_demand)):.2f} kg")
+    print(f"  R²: {r2_score(y_cargo_demand_test, ensemble_pred_cargo_demand):.4f}")
+    
+    # Cargo volume ensemble prediction
+    ensemble_pred_cargo_volume = np.zeros(len(y_cargo_volume_test))
+    for model_name, pred in preds_cargo_volume.items():
+        ensemble_pred_cargo_volume += weights_cargo_volume[model_name] * pred
+    
+    print(f"\nCargo Volume Ensemble:")
+    print(f"  MAE: {mean_absolute_error(y_cargo_volume_test, ensemble_pred_cargo_volume):.2f} m³")
+    print(f"  RMSE: {np.sqrt(mean_squared_error(y_cargo_volume_test, ensemble_pred_cargo_volume)):.2f} m³")
+    print(f"  R²: {r2_score(y_cargo_volume_test, ensemble_pred_cargo_volume):.4f}")
     
     # Remaining cargo ensemble prediction
     ensemble_pred_remaining = np.zeros(len(y_remaining_test))
@@ -411,20 +455,30 @@ def train_model(X, y_baggage, y_remaining, feature_cols):
         'models': models_baggage,
         'weights': weights_baggage
     }
+    ensemble_cargo_demand = {
+        'models': models_cargo_demand,
+        'weights': weights_cargo_demand
+    }
+    ensemble_cargo_volume = {
+        'models': models_cargo_volume,
+        'weights': weights_cargo_volume
+    }
     ensemble_remaining = {
         'models': models_remaining,
         'weights': weights_remaining
     }
     
-    return ensemble_baggage, ensemble_remaining, feature_cols
+    return ensemble_baggage, ensemble_cargo_demand, ensemble_cargo_volume, ensemble_remaining, feature_cols
 
-def save_model(ensemble_baggage, ensemble_remaining, feature_cols, label_encoders):
+def save_model(ensemble_baggage, ensemble_cargo_demand, ensemble_cargo_volume, ensemble_remaining, feature_cols, label_encoders):
     """Save trained ensemble models and metadata."""
     models_dir = Path(__file__).parent.parent / "models"
     models_dir.mkdir(exist_ok=True)
     
     model_data = {
         'baggage_ensemble': ensemble_baggage,
+        'cargo_demand_ensemble': ensemble_cargo_demand,
+        'cargo_volume_ensemble': ensemble_cargo_volume,
         'remaining_ensemble': ensemble_remaining,
         'feature_cols': feature_cols,
         'label_encoders': label_encoders,
@@ -450,13 +504,15 @@ def main():
     df, label_encoders = clean_and_prepare_data(df)
     
     # Prepare features
-    X, y_baggage, y_remaining, feature_cols = prepare_features(df)
+    X, y_baggage, y_cargo_demand, y_cargo_volume, y_remaining, feature_cols = prepare_features(df)
     
     # Train ensemble models
-    ensemble_baggage, ensemble_remaining, feature_cols = train_model(X, y_baggage, y_remaining, feature_cols)
+    ensemble_baggage, ensemble_cargo_demand, ensemble_cargo_volume, ensemble_remaining, feature_cols = train_model(
+        X, y_baggage, y_cargo_demand, y_cargo_volume, y_remaining, feature_cols
+    )
     
     # Save ensemble models
-    save_model(ensemble_baggage, ensemble_remaining, feature_cols, label_encoders)
+    save_model(ensemble_baggage, ensemble_cargo_demand, ensemble_cargo_volume, ensemble_remaining, feature_cols, label_encoders)
     
     print("\n" + "=" * 60)
     print("Training complete!")

@@ -55,6 +55,17 @@ class MarketplaceGenerateRequest(BaseModel):
     confidence: float = 0.8
     slot_size_kg: float = 20.0
 
+class OptimizationRequest(BaseModel):
+    available_weight: float
+    available_volume: float
+    cargo_requests: List[Dict]
+    strategy: str = 'balanced'
+
+class PricingSuggestionRequest(BaseModel):
+    available_capacity: float
+    predicted_demand: float
+    confidence: float
+
 class ReservationRequest(BaseModel):
     customer_info: Optional[Dict] = None
 
@@ -88,10 +99,11 @@ async def predict(flight_data: Dict):
     """
     Predict cargo capacity for a flight.
     
-    Formula: remaining_cargo = min(max_weight, max_volume) - (baggage + cargo)
-    - Baggage is a function of passenger_count
-    - Remaining cargo is what can be sold (e.g., to Shopee)
-    - Total capacity varies by aircraft type
+    New features:
+    - Predicts baggage weight (function of passenger_count)
+    - Predicts cargo demand (future cargo bookings)
+    - Predicts cargo volume
+    - Calculates remaining capacity: min(max_weight, max_volume) - (baggage + predicted_cargo)
     
     Expected flight_data fields:
     - passenger_count (required): Number of passengers (determines baggage)
@@ -177,6 +189,47 @@ async def feature_importance():
     try:
         top_features = forecaster.get_feature_importance(top_n=10)
         return {"top_features": top_features}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/marketplace/optimize")
+async def optimize_allocation(request: OptimizationRequest):
+    """
+    Optimize cargo allocation for multiple requests.
+    
+    Strategies:
+    - revenue_max: Maximize total revenue
+    - utilization_max: Maximize capacity utilization
+    - priority_first: Prioritize by customer priority
+    - balanced: Balance revenue, utilization, and priority
+    
+    Returns allocation results and statistics.
+    """
+    try:
+        result = marketplace.optimize_allocation(
+            available_weight=request.available_weight,
+            available_volume=request.available_volume,
+            cargo_requests=request.cargo_requests,
+            strategy=request.strategy
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/marketplace/pricing-suggestion")
+async def get_pricing_suggestion(request: PricingSuggestionRequest):
+    """
+    Get dynamic pricing suggestions based on supply/demand.
+    
+    Returns recommended pricing strategy and multipliers.
+    """
+    try:
+        result = marketplace.suggest_pricing(
+            available_capacity=request.available_capacity,
+            predicted_demand=request.predicted_demand,
+            confidence=request.confidence
+        )
+        return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 

@@ -1,17 +1,19 @@
 """
-Cargo Marketplace - Generate slots and manage reservations.
+Cargo Marketplace - Generate slots and manage reservations with optimization.
 """
 from typing import List, Dict, Optional
 import uuid
 from datetime import datetime
+from .optimizer import CargoOptimizer, CargoRequest, AllocationResult
 
 class CargoMarketplace:
-    """Marketplace for selling cargo capacity slots."""
+    """Marketplace for selling cargo capacity slots with optimization."""
     
     def __init__(self):
         """Initialize marketplace with empty reservations."""
         self.reservations: Dict[str, Dict] = {}
         self.base_price_per_kg = 2.0  # Base price per kg
+        self.optimizer = CargoOptimizer()
     
     def generate_slots(
         self, 
@@ -108,4 +110,93 @@ class CargoMarketplace:
     def is_reserved(self, slot_id: str) -> bool:
         """Check if a slot is reserved."""
         return slot_id in self.reservations
+    
+    def optimize_allocation(
+        self,
+        available_weight: float,
+        available_volume: float,
+        cargo_requests: List[Dict],
+        strategy: str = 'balanced'
+    ) -> Dict:
+        """
+        Optimize cargo allocation for multiple requests.
+        
+        Args:
+            available_weight: Available weight capacity (kg)
+            available_volume: Available volume capacity (m³)
+            cargo_requests: List of cargo request dictionaries
+            strategy: 'revenue_max', 'utilization_max', 'priority_first', or 'balanced'
+            
+        Returns:
+            Dictionary with allocation results and statistics
+        """
+        # Convert dicts to CargoRequest objects
+        requests = []
+        for req in cargo_requests:
+            requests.append(CargoRequest(
+                request_id=req.get('request_id', str(uuid.uuid4())[:8]),
+                weight=req['weight'],
+                volume=req.get('volume', req['weight'] / 200),  # Default density
+                priority=req.get('priority', 3),
+                revenue_per_kg=req.get('revenue_per_kg', self.base_price_per_kg),
+                customer_type=req.get('customer_type', 'standard')
+            ))
+        
+        # Run optimization
+        allocations, stats = self.optimizer.optimize_allocation(
+            available_weight=available_weight,
+            available_volume=available_volume,
+            cargo_requests=requests,
+            strategy=strategy
+        )
+        
+        # Convert results to dicts
+        allocation_dicts = []
+        for alloc in allocations:
+            allocation_dicts.append({
+                'request_id': alloc.request_id,
+                'allocated': alloc.allocated,
+                'weight': round(alloc.weight, 2),
+                'volume': round(alloc.volume, 2),
+                'revenue': round(alloc.revenue, 2),
+                'slot_ids': alloc.slot_ids
+            })
+        
+        return {
+            'allocations': allocation_dicts,
+            'statistics': {
+                'total_revenue': round(stats['total_revenue'], 2),
+                'weight_utilization': round(stats['weight_utilization'] * 100, 1),
+                'volume_utilization': round(stats['volume_utilization'] * 100, 1),
+                'allocated_count': stats['allocated_count'],
+                'rejected_count': stats['rejected_count'],
+                'remaining_weight': round(stats['remaining_weight'], 2),
+                'remaining_volume': round(stats['remaining_volume'], 2),
+                'strategy': stats['strategy']
+            }
+        }
+    
+    def suggest_pricing(
+        self,
+        available_capacity: float,
+        predicted_demand: float,
+        confidence: float
+    ) -> Dict:
+        """
+        Get dynamic pricing suggestions based on supply/demand.
+        
+        Args:
+            available_capacity: Available cargo capacity (kg)
+            predicted_demand: Predicted cargo demand (kg)
+            confidence: Prediction confidence (0-1)
+            
+        Returns:
+            Dictionary with pricing recommendations
+        """
+        return self.optimizer.suggest_pricing(
+            available_capacity=available_capacity,
+            predicted_demand=predicted_demand,
+            confidence=confidence,
+            base_price=self.base_price_per_kg
+        )
 

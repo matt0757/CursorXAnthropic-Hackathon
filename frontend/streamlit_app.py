@@ -58,7 +58,7 @@ def main():
     st.sidebar.title("Navigation")
     page = st.sidebar.radio(
         "Choose a page",
-        ["Forecast", "What-If Simulator", "Marketplace"]
+        ["Forecast", "What-If Simulator", "Marketplace", "Cargo Optimizer"]
     )
     
     if page == "Forecast":
@@ -67,6 +67,8 @@ def main():
         show_simulator_page()
     elif page == "Marketplace":
         show_marketplace_page()
+    elif page == "Cargo Optimizer":
+        show_optimizer_page()
 
 def show_forecast_page():
     """Forecast page."""
@@ -135,12 +137,27 @@ def show_forecast_page():
                 
                 with col2:
                     st.metric(
-                        "Remaining Cargo",
+                        "Predicted Cargo Demand",
+                        f"{result.get('predicted_cargo_demand', 0):.0f} kg",
+                        delta=f"±{(result.get('predicted_cargo_demand_upper', 0) - result.get('predicted_cargo_demand', 0)) / (result.get('predicted_cargo_demand', 1) + 1) * 100:.1f}%"
+                    )
+                
+                with col3:
+                    st.metric(
+                        "Remaining Cargo Capacity",
                         f"{result['remaining_cargo']:.0f} kg",
                         delta=f"±{(result['remaining_cargo_upper'] - result['remaining_cargo']) / (result['remaining_cargo'] + 1) * 100:.1f}%"
                     )
                 
-                with col3:
+                col4, col5 = st.columns(2)
+                
+                with col4:
+                    st.metric(
+                        "Predicted Cargo Volume",
+                        f"{result.get('predicted_cargo_volume', 0):.1f} m³"
+                    )
+                
+                with col5:
                     confidence_color = "🟢" if result['confidence'] > 0.7 else "🟡" if result['confidence'] > 0.4 else "🔴"
                     st.metric(
                         "Confidence",
@@ -441,6 +458,230 @@ def show_marketplace_page():
             st.metric("Total Weight", f"{total_weight:.0f} kg")
             st.metric("Total Value", f"${total_value:.2f}")
             st.metric("Avg Price/kg", f"${avg_price_per_kg:.2f}")
+
+def show_optimizer_page():
+    """Cargo Optimizer page."""
+    st.header("🔧 Cargo Allocation Optimizer")
+    st.markdown("Optimize cargo allocation for multiple booking requests.")
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.subheader("Available Capacity")
+        
+        col_a, col_b = st.columns(2)
+        with col_a:
+            available_weight = st.number_input(
+                "Available Weight (kg)",
+                min_value=0.0,
+                max_value=10000.0,
+                value=1000.0,
+                step=100.0
+            )
+        
+        with col_b:
+            available_volume = st.number_input(
+                "Available Volume (m³)",
+                min_value=0.0,
+                max_value=100.0,
+                value=10.0,
+                step=1.0
+            )
+        
+        st.subheader("Cargo Requests")
+        
+        # Allow user to add cargo requests
+        if 'cargo_requests' not in st.session_state:
+            st.session_state['cargo_requests'] = []
+        
+        with st.expander("➕ Add Cargo Request"):
+            col_c, col_d, col_e = st.columns(3)
+            
+            with col_c:
+                req_weight = st.number_input("Weight (kg)", min_value=1.0, value=100.0, key="req_weight")
+                req_volume = st.number_input("Volume (m³)", min_value=0.1, value=1.0, key="req_volume")
+            
+            with col_d:
+                req_priority = st.selectbox("Priority", options=[1, 2, 3, 4, 5], index=2, key="req_priority")
+                req_revenue = st.number_input("Revenue per kg ($)", min_value=0.5, value=2.0, step=0.1, key="req_revenue")
+            
+            with col_e:
+                req_customer = st.selectbox("Customer Type", options=["standard", "premium", "spot"], key="req_customer")
+                
+                if st.button("Add Request"):
+                    st.session_state['cargo_requests'].append({
+                        'request_id': f"REQ{len(st.session_state['cargo_requests']) + 1:03d}",
+                        'weight': req_weight,
+                        'volume': req_volume,
+                        'priority': req_priority,
+                        'revenue_per_kg': req_revenue,
+                        'customer_type': req_customer
+                    })
+                    st.success(f"Added request REQ{len(st.session_state['cargo_requests']):03d}")
+        
+        # Display current requests
+        if st.session_state['cargo_requests']:
+            st.subheader(f"Current Requests ({len(st.session_state['cargo_requests'])})")
+            
+            requests_df = pd.DataFrame(st.session_state['cargo_requests'])
+            st.dataframe(requests_df, use_container_width=True)
+            
+            if st.button("🗑️ Clear All Requests"):
+                st.session_state['cargo_requests'] = []
+                st.rerun()
+        
+        st.subheader("Optimization Strategy")
+        strategy = st.selectbox(
+            "Select Strategy",
+            options=["balanced", "revenue_max", "utilization_max", "priority_first"],
+            format_func=lambda x: {
+                "balanced": "⚖️ Balanced (Revenue + Priority + Utilization)",
+                "revenue_max": "💰 Maximize Revenue",
+                "utilization_max": "📦 Maximize Utilization",
+                "priority_first": "⭐ Priority First"
+            }[x]
+        )
+        
+        if st.button("🚀 Run Optimization", type="primary", disabled=len(st.session_state.get('cargo_requests', [])) == 0):
+            try:
+                response = requests.post(
+                    f"{API_BASE_URL}/marketplace/optimize",
+                    json={
+                        "available_weight": available_weight,
+                        "available_volume": available_volume,
+                        "cargo_requests": st.session_state['cargo_requests'],
+                        "strategy": strategy
+                    }
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    
+                    st.success("✅ Optimization Complete!")
+                    
+                    # Statistics
+                    stats = result['statistics']
+                    
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        st.metric("Total Revenue", f"${stats['total_revenue']:.2f}")
+                    
+                    with col2:
+                        st.metric("Weight Utilization", f"{stats['weight_utilization']:.1f}%")
+                    
+                    with col3:
+                        st.metric("Volume Utilization", f"{stats['volume_utilization']:.1f}%")
+                    
+                    with col4:
+                        st.metric("Allocated", f"{stats['allocated_count']}/{stats['allocated_count'] + stats['rejected_count']}")
+                    
+                    # Allocations
+                    st.subheader("📋 Allocation Results")
+                    
+                    allocations = result['allocations']
+                    
+                    # Separate allocated and rejected
+                    allocated = [a for a in allocations if a['allocated']]
+                    rejected = [a for a in allocations if not a['allocated']]
+                    
+                    if allocated:
+                        st.markdown("**✅ Allocated Requests:**")
+                        allocated_df = pd.DataFrame(allocated)
+                        st.dataframe(allocated_df, use_container_width=True)
+                    
+                    if rejected:
+                        st.markdown("**❌ Rejected Requests:**")
+                        rejected_df = pd.DataFrame(rejected)
+                        st.dataframe(rejected_df[['request_id']], use_container_width=True)
+                    
+                    # Visualization
+                    st.subheader("📊 Utilization Visualization")
+                    
+                    fig = go.Figure()
+                    
+                    fig.add_trace(go.Bar(
+                        name='Weight',
+                        x=['Capacity'],
+                        y=[stats['weight_utilization']],
+                        marker_color='#1f77b4'
+                    ))
+                    
+                    fig.add_trace(go.Bar(
+                        name='Volume',
+                        x=['Capacity'],
+                        y=[stats['volume_utilization']],
+                        marker_color='#2ca02c'
+                    ))
+                    
+                    fig.update_layout(
+                        title="Capacity Utilization",
+                        yaxis_title="Utilization (%)",
+                        yaxis_range=[0, 100],
+                        height=300
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                else:
+                    st.error(f"Error: {response.text}")
+            
+            except Exception as e:
+                st.error(f"Failed to connect to API: {str(e)}")
+    
+    with col2:
+        st.subheader("💡 Strategy Guide")
+        st.info("""
+        **Optimization Strategies:**
+        
+        ⚖️ **Balanced**
+        - Combines revenue, priority, and utilization
+        - Best for mixed objectives
+        
+        💰 **Revenue Max**
+        - Maximizes total revenue
+        - Uses greedy knapsack approach
+        
+        📦 **Utilization Max**
+        - Maximizes capacity usage
+        - Reduces wasted space
+        
+        ⭐ **Priority First**
+        - Prioritizes high-value customers
+        - Good for loyalty programs
+        """)
+        
+        # Dynamic pricing suggestion
+        st.subheader("💵 Pricing Suggestion")
+        
+        pred_demand = st.number_input("Predicted Demand (kg)", min_value=0.0, value=800.0, key="pricing_demand")
+        confidence = st.slider("Confidence", 0.0, 1.0, 0.8, key="pricing_confidence")
+        
+        if st.button("Get Pricing Suggestion"):
+            try:
+                response = requests.post(
+                    f"{API_BASE_URL}/marketplace/pricing-suggestion",
+                    json={
+                        "available_capacity": available_weight,
+                        "predicted_demand": pred_demand,
+                        "confidence": confidence
+                    }
+                )
+                
+                if response.status_code == 200:
+                    pricing = response.json()
+                    
+                    st.metric("Suggested Price", f"${pricing['suggested_price_per_kg']:.2f}/kg")
+                    st.metric("Strategy", pricing['pricing_strategy'].upper())
+                    st.metric("Demand Ratio", f"{pricing['demand_ratio']:.2f}")
+                    
+                    st.info(f"**Market Balance:** {pricing['demand_supply_balance']}")
+                
+                else:
+                    st.error(f"Error: {response.text}")
+            
+            except Exception as e:
+                st.error(f"Failed to connect to API: {str(e)}")
 
 if __name__ == "__main__":
     main()

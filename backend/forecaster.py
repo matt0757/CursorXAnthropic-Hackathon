@@ -28,6 +28,8 @@ class CargoForecaster:
         if 'baggage_ensemble' in model_data:
             # New ensemble format
             self.baggage_ensemble = model_data['baggage_ensemble']
+            self.cargo_demand_ensemble = model_data.get('cargo_demand_ensemble')
+            self.cargo_volume_ensemble = model_data.get('cargo_volume_ensemble')
             self.remaining_ensemble = model_data['remaining_ensemble']
             self.ensemble_type = model_data.get('ensemble_type', 'weighted')
             self.use_ensemble = True
@@ -158,10 +160,13 @@ class CargoForecaster:
     def predict(self, flight_data: Dict, existing_cargo_weight_kg: float = 0.0, 
                 existing_cargo_volume_m3: float = 0.0) -> Dict:
         """
-        Predict baggage weight (function of passenger count) and remaining cargo capacity.
+        Predict baggage weight, cargo demand, and remaining cargo capacity.
         
-        Remaining cargo = min(max_weight, max_volume) - (baggage + cargo)
-        The binding constraint is whichever is more restrictive.
+        Predictions:
+        - Baggage weight (function of passenger count)
+        - Cargo demand (predicted future cargo bookings)
+        - Cargo volume (predicted future cargo volume)
+        - Remaining cargo capacity = min(max_weight, max_volume) - (baggage + predicted_cargo)
         
         Args:
             flight_data: Dictionary with flight features (must include passenger_count)
@@ -187,6 +192,22 @@ class CargoForecaster:
             # Ensemble prediction for baggage (function of passenger count)
             baggage_pred = self._predict_ensemble(X, self.baggage_ensemble)
             
+            # Ensemble prediction for cargo demand
+            if self.cargo_demand_ensemble:
+                cargo_demand_pred = self._predict_ensemble(X, self.cargo_demand_ensemble)
+                cargo_demand_std = self._get_ensemble_std(X, self.cargo_demand_ensemble)
+            else:
+                cargo_demand_pred = 0
+                cargo_demand_std = 0
+            
+            # Ensemble prediction for cargo volume
+            if self.cargo_volume_ensemble:
+                cargo_volume_pred = self._predict_ensemble(X, self.cargo_volume_ensemble)
+                cargo_volume_std = self._get_ensemble_std(X, self.cargo_volume_ensemble)
+            else:
+                cargo_volume_pred = 0
+                cargo_volume_std = 0
+            
             # For remaining cargo, we'll calculate it from constraints rather than direct prediction
             # But we can still use the model's prediction as a baseline
             remaining_model_pred = self._predict_ensemble(X, self.remaining_ensemble)
@@ -197,6 +218,10 @@ class CargoForecaster:
         else:
             # Legacy single model prediction
             baggage_pred = self.baggage_model.predict(X)[0]
+            cargo_demand_pred = 0
+            cargo_demand_std = 0
+            cargo_volume_pred = 0
+            cargo_volume_std = 0
             remaining_model_pred = self.remaining_model.predict(X)[0]
             
             # Bootstrap for confidence intervals
@@ -260,12 +285,20 @@ class CargoForecaster:
             'predicted_baggage': float(baggage_pred),
             'predicted_baggage_lower': float(max(0, baggage_lower)),
             'predicted_baggage_upper': float(baggage_upper),
+            'predicted_cargo_demand': float(cargo_demand_pred),
+            'predicted_cargo_demand_lower': float(max(0, cargo_demand_pred - 1.96 * cargo_demand_std)),
+            'predicted_cargo_demand_upper': float(cargo_demand_pred + 1.96 * cargo_demand_std),
+            'predicted_cargo_volume': float(cargo_volume_pred),
+            'predicted_cargo_volume_lower': float(max(0, cargo_volume_pred - 1.96 * cargo_volume_std)),
+            'predicted_cargo_volume_upper': float(cargo_volume_pred + 1.96 * cargo_volume_std),
             'remaining_cargo': float(remaining_cargo),
             'remaining_cargo_lower': float(max(0, remaining_lower)),
             'remaining_cargo_upper': float(remaining_upper),
             'confidence': float(confidence),
             'confidence_std': {
                 'baggage': float(baggage_std),
+                'cargo_demand': float(cargo_demand_std),
+                'cargo_volume': float(cargo_volume_std),
                 'remaining': float(remaining_model_std)
             },
             'constraint_info': {
