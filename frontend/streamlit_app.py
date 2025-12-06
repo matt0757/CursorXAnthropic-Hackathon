@@ -356,199 +356,318 @@ def show_marketplace_page():
             st.metric("Avg Price/kg", f"${avg_price_per_kg:.2f}")
 
 def show_optimizer_page():
-    """Cargo Optimizer page."""
-    st.header("🔧 Cargo Allocation Optimizer")
-    st.markdown("Optimize cargo allocation for multiple booking requests.")
+    """Cargo Optimizer page - Multi-flight allocation with priority-based scheduling."""
+    st.header("🔧 Multi-Flight Cargo Optimizer")
+    st.markdown("Allocate cargo across multiple flights. Higher priority cargo gets earlier flights.")
+    
+    # Initialize session state
+    if 'cargo_requests' not in st.session_state:
+        st.session_state['cargo_requests'] = []
+    if 'optimization_result' not in st.session_state:
+        st.session_state['optimization_result'] = None
+    if 'flights_loaded' not in st.session_state:
+        st.session_state['flights_loaded'] = False
+    
+    # Check if flights are loaded
+    try:
+        status_response = requests.get(f"{API_BASE_URL}/flights/status")
+        if status_response.status_code == 200:
+            status = status_response.json()
+            st.session_state['flights_loaded'] = status['flights_loaded']
+            st.session_state['flight_count'] = status['flight_count']
+    except:
+        pass
     
     col1, col2 = st.columns([2, 1])
     
     with col1:
-        st.subheader("Available Capacity")
+        # Flight Data Loading Section
+        st.subheader("📂 Flight Data")
         
-        col_a, col_b = st.columns(2)
-        with col_a:
-            available_weight = st.number_input(
-                "Available Weight (kg)",
-                min_value=0.0,
-                max_value=10000.0,
-                value=1000.0,
-                step=100.0
-            )
-        
-        with col_b:
-            available_volume = st.number_input(
-                "Available Volume (m³)",
-                min_value=0.0,
-                max_value=100.0,
-                value=10.0,
-                step=1.0
-            )
-        
-        st.subheader("Cargo Requests")
-        
-        # Allow user to add cargo requests
-        if 'cargo_requests' not in st.session_state:
-            st.session_state['cargo_requests'] = []
-        
-        with st.expander("➕ Add Cargo Request"):
-            col_c, col_d, col_e = st.columns(3)
+        if not st.session_state.get('flights_loaded', False):
+            st.warning("⚠️ No flights loaded.")
             
-            with col_c:
-                req_weight = st.number_input("Weight (kg)", min_value=1.0, value=100.0, key="req_weight")
-                req_volume = st.number_input("Volume (m³)", min_value=0.1, value=1.0, key="req_volume")
-            
-            with col_d:
-                req_priority = st.selectbox("Priority", options=[1, 2, 3, 4, 5], index=2, key="req_priority")
-                req_revenue = st.number_input("Revenue per kg ($)", min_value=0.5, value=2.0, step=0.1, key="req_revenue")
-            
-            with col_e:
-                req_customer = st.selectbox("Customer Type", options=["standard", "premium", "spot"], key="req_customer")
+            if st.button("📥 Load Future Flights (2025)", type="primary"):
+                try:
+                    response = requests.post(
+                        f"{API_BASE_URL}/flights/load",
+                        json={"filepath": "data/future_flights_2025.csv"}
+                    )
+                    if response.status_code == 200:
+                        result = response.json()
+                        st.success(f"✅ {result['message']}")
+                        st.session_state['flights_loaded'] = True
+                        st.session_state['flight_count'] = result['flight_count']
+                        st.rerun()
+                    else:
+                        st.error(f"Error: {response.json().get('detail', response.text)}")
+                except Exception as e:
+                    st.error(f"Failed to load flights: {str(e)}")
+        else:
+            st.success(f"✅ {st.session_state.get('flight_count', 0)} flights loaded")
+        
+        st.divider()
+        
+        # Flight Filter Section
+        st.subheader("✈️ Flight Selection")
+        
+        filter_col1, filter_col2 = st.columns(2)
+        with filter_col1:
+            origin_filter = st.text_input("Origin Airport", placeholder="e.g., KUL", key="opt_origin")
+            from_date = st.date_input("From Date", value=None, key="opt_from_date")
+        with filter_col2:
+            dest_filter = st.text_input("Destination Airport", placeholder="e.g., SIN", key="opt_dest")
+            to_date = st.date_input("To Date", value=None, key="opt_to_date")
+        
+        # Load and display available flights
+        if st.button("🔍 Load Available Flights", disabled=not st.session_state.get('flights_loaded', False)):
+            try:
+                params = {}
+                if origin_filter:
+                    params['origin'] = origin_filter
+                if dest_filter:
+                    params['destination'] = dest_filter
+                if from_date:
+                    params['from_date'] = from_date.strftime('%Y-%m-%d')
+                if to_date:
+                    params['to_date'] = to_date.strftime('%Y-%m-%d')
                 
-                if st.button("Add Request"):
-                    st.session_state['cargo_requests'].append({
-                        'request_id': f"REQ{len(st.session_state['cargo_requests']) + 1:03d}",
-                        'weight': req_weight,
-                        'volume': req_volume,
-                        'priority': req_priority,
-                        'revenue_per_kg': req_revenue,
-                        'customer_type': req_customer
-                    })
-                    st.success(f"Added request REQ{len(st.session_state['cargo_requests']):03d}")
+                response = requests.get(f"{API_BASE_URL}/flights/utilization", params=params)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    st.session_state['available_flights'] = data['utilization']
+                    if data['total'] > 0:
+                        st.success(f"Found {data['total']} flights")
+                    else:
+                        st.warning("No flights found matching the criteria")
+                else:
+                    st.error(f"Error loading flights: {response.text}")
+            except Exception as e:
+                st.error(f"Failed to connect to API: {str(e)}")
+        
+        # Display available flights
+        if 'available_flights' in st.session_state and st.session_state['available_flights']:
+            flights_df = pd.DataFrame(st.session_state['available_flights'])
+            display_cols = ['flight_number', 'flight_date', 'origin', 'destination', 
+                          'available_weight_kg', 'available_volume_m3', 
+                          'weight_utilization_pct', 'is_near_full']
+            st.dataframe(flights_df[display_cols], use_container_width=True, height=200)
+        
+        st.divider()
+        
+        # Cargo Requests Section
+        st.subheader("📦 Cargo Requests")
+        
+        with st.expander("➕ Add Cargo Request", expanded=True):
+            req_col1, req_col2 = st.columns(2)
+            
+            with req_col1:
+                req_weight = st.number_input("Weight (kg)", min_value=1.0, value=100.0, key="req_weight")
+                req_volume = st.number_input("Volume (m³)", min_value=0.1, value=1.0, step=0.1, key="req_volume")
+            
+            with req_col2:
+                req_priority = st.selectbox(
+                    "Priority (1=Low, 5=High)", 
+                    options=[1, 2, 3, 4, 5], 
+                    index=2, 
+                    key="req_priority",
+                    help="Higher priority cargo gets allocated to earlier flights"
+                )
+                req_customer = st.selectbox(
+                    "Customer Type", 
+                    options=["standard", "premium", "spot"], 
+                    key="req_customer"
+                )
+            
+            if st.button("➕ Add Request"):
+                st.session_state['cargo_requests'].append({
+                    'request_id': f"REQ{len(st.session_state['cargo_requests']) + 1:03d}",
+                    'weight': req_weight,
+                    'volume': req_volume,
+                    'priority': req_priority,
+                    'customer_type': req_customer
+                })
+                st.rerun()
         
         # Display current requests
         if st.session_state['cargo_requests']:
-            st.subheader(f"Current Requests ({len(st.session_state['cargo_requests'])})")
+            st.markdown(f"**Current Requests ({len(st.session_state['cargo_requests'])})**")
             
             requests_df = pd.DataFrame(st.session_state['cargo_requests'])
             st.dataframe(requests_df, use_container_width=True)
             
-            if st.button("🗑️ Clear All Requests"):
-                st.session_state['cargo_requests'] = []
-                st.rerun()
+            btn_col1, btn_col2 = st.columns(2)
+            with btn_col1:
+                if st.button("🗑️ Clear All Requests"):
+                    st.session_state['cargo_requests'] = []
+                    st.session_state['optimization_result'] = None
+                    st.rerun()
+            with btn_col2:
+                if st.button("🔄 Reset Allocations"):
+                    try:
+                        requests.post(f"{API_BASE_URL}/marketplace/reset")
+                        st.success("Allocations reset!")
+                        if 'available_flights' in st.session_state:
+                            del st.session_state['available_flights']
+                    except:
+                        pass
         
-        st.subheader("Optimization Strategy")
-        strategy = st.selectbox(
-            "Select Strategy",
-            options=["balanced", "revenue_max", "utilization_max", "priority_first"],
-            format_func=lambda x: {
-                "balanced": "⚖️ Balanced (Revenue + Priority + Utilization)",
-                "revenue_max": "💰 Maximize Revenue",
-                "utilization_max": "📦 Maximize Utilization",
-                "priority_first": "⭐ Priority First"
-            }[x]
-        )
+        st.divider()
         
-        if st.button("🚀 Run Optimization", type="primary", disabled=len(st.session_state.get('cargo_requests', [])) == 0):
+        # Run Optimization
+        st.subheader("🚀 Run Optimization")
+        
+        if st.button("🚀 Allocate Cargo to Flights", type="primary", 
+                    disabled=len(st.session_state.get('cargo_requests', [])) == 0):
             try:
+                # Build request
+                opt_request = {
+                    "cargo_requests": st.session_state['cargo_requests'],
+                    "commit": True
+                }
+                if origin_filter:
+                    opt_request['origin'] = origin_filter
+                if dest_filter:
+                    opt_request['destination'] = dest_filter
+                if from_date:
+                    opt_request['from_date'] = from_date.strftime('%Y-%m-%d')
+                if to_date:
+                    opt_request['to_date'] = to_date.strftime('%Y-%m-%d')
+                
                 response = requests.post(
                     f"{API_BASE_URL}/marketplace/optimize",
-                    json={
-                        "available_weight": available_weight,
-                        "available_volume": available_volume,
-                        "cargo_requests": st.session_state['cargo_requests'],
-                        "strategy": strategy
-                    }
+                    json=opt_request
                 )
                 
                 if response.status_code == 200:
-                    result = response.json()
-                    
-                    st.success("✅ Optimization Complete!")
-                    
-                    # Statistics
-                    stats = result['statistics']
-                    
-                    stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
-                    
-                    with stat_col1:
-                        st.metric("Total Revenue", f"${stats['total_revenue']:.2f}")
-                    
-                    with stat_col2:
-                        st.metric("Weight Utilization", f"{stats['weight_utilization']:.1f}%")
-                    
-                    with stat_col3:
-                        st.metric("Volume Utilization", f"{stats['volume_utilization']:.1f}%")
-                    
-                    with stat_col4:
-                        st.metric("Allocated", f"{stats['allocated_count']}/{stats['allocated_count'] + stats['rejected_count']}")
-                    
-                    # Allocations
-                    st.subheader("📋 Allocation Results")
-                    
-                    allocations = result['allocations']
-                    
-                    # Separate allocated and rejected
-                    allocated = [a for a in allocations if a['allocated']]
-                    rejected = [a for a in allocations if not a['allocated']]
-                    
-                    if allocated:
-                        st.markdown("**✅ Allocated Requests:**")
-                        allocated_df = pd.DataFrame(allocated)
-                        st.dataframe(allocated_df, use_container_width=True)
-                    
-                    if rejected:
-                        st.markdown("**❌ Rejected Requests:**")
-                        rejected_df = pd.DataFrame(rejected)
-                        st.dataframe(rejected_df[['request_id']], use_container_width=True)
-                    
-                    # Visualization
-                    st.subheader("📊 Utilization Visualization")
-                    
-                    fig = go.Figure()
-                    
-                    fig.add_trace(go.Bar(
-                        name='Weight',
-                        x=['Capacity'],
-                        y=[stats['weight_utilization']],
-                        marker_color='#1f77b4'
-                    ))
-                    
-                    fig.add_trace(go.Bar(
-                        name='Volume',
-                        x=['Capacity'],
-                        y=[stats['volume_utilization']],
-                        marker_color='#2ca02c'
-                    ))
-                    
-                    fig.update_layout(
-                        title="Capacity Utilization",
-                        yaxis_title="Utilization (%)",
-                        yaxis_range=[0, 100],
-                        height=300
-                    )
-                    
-                    st.plotly_chart(fig, use_container_width=True)
-                
+                    st.session_state['optimization_result'] = response.json()
+                    st.rerun()
                 else:
                     st.error(f"Error: {response.text}")
             
             except Exception as e:
                 st.error(f"Failed to connect to API: {str(e)}")
+        
+        # Display Optimization Results
+        if st.session_state.get('optimization_result'):
+            result = st.session_state['optimization_result']
+            
+            st.success("✅ Optimization Complete!")
+            
+            # Statistics
+            stats = result['statistics']
+            
+            stat_col1, stat_col2, stat_col3 = st.columns(3)
+            with stat_col1:
+                st.metric("Total Weight Allocated", f"{stats['total_allocated_weight']:.1f} kg")
+            with stat_col2:
+                st.metric("Flights Used", stats['flights_used'])
+            with stat_col3:
+                st.metric("Allocated", f"{stats['allocated_count']}/{stats['total_requests']}")
+            
+            # Allocation Results by Flight
+            st.subheader("📋 Allocation Results")
+            
+            allocations = result['allocations']
+            allocated = [a for a in allocations if a['allocated']]
+            rejected = [a for a in allocations if not a['allocated']]
+            
+            if allocated:
+                st.markdown("**✅ Allocated Cargo:**")
+                allocated_df = pd.DataFrame(allocated)
+                display_cols = ['request_id', 'weight', 'volume', 'flight_number', 'flight_date']
+                st.dataframe(allocated_df[display_cols], use_container_width=True)
+            
+            if rejected:
+                st.markdown("**❌ Rejected (No capacity):**")
+                rejected_df = pd.DataFrame(rejected)
+                st.dataframe(rejected_df[['request_id', 'weight', 'volume', 'reason']], use_container_width=True)
+            
+            # Flight Updates
+            if result.get('flight_updates'):
+                st.subheader("✈️ Flight Updates (Database)")
+                
+                for update in result['flight_updates']:
+                    with st.expander(f"Flight {update['flight_number']} on {update['flight_date']}"):
+                        st.write(f"**Weight Added:** {update['weight_added']:.1f} kg")
+                        st.write(f"**Volume Added:** {update['volume_added']:.1f} m³")
+                        st.write(f"**Requests:** {', '.join(update['requests'])}")
+                        if update.get('committed'):
+                            st.success("✅ Committed to database")
+            
+            # Visualization
+            if allocated:
+                st.subheader("📊 Allocation by Flight")
+                
+                # Group by flight
+                flight_summary = {}
+                for a in allocated:
+                    key = f"{a['flight_number']} ({a['flight_date']})"
+                    if key not in flight_summary:
+                        flight_summary[key] = {'weight': 0, 'volume': 0, 'count': 0}
+                    flight_summary[key]['weight'] += a['weight']
+                    flight_summary[key]['volume'] += a['volume']
+                    flight_summary[key]['count'] += 1
+                
+                fig = go.Figure()
+                
+                flights = list(flight_summary.keys())
+                weights = [flight_summary[f]['weight'] for f in flights]
+                
+                fig.add_trace(go.Bar(
+                    name='Weight (kg)',
+                    x=flights,
+                    y=weights,
+                    marker_color='#1f77b4',
+                    text=[f"{w:.0f} kg" for w in weights],
+                    textposition='auto'
+                ))
+                
+                fig.update_layout(
+                    title="Cargo Allocated per Flight",
+                    xaxis_title="Flight",
+                    yaxis_title="Weight (kg)",
+                    height=350
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
     
     with col2:
-        st.subheader("💡 Strategy Guide")
+        st.subheader("💡 How It Works")
         st.info("""
-        **Optimization Strategies:**
+        **Priority-Based Allocation:**
         
-        ⚖️ **Balanced**
-        - Combines revenue, priority, and utilization
-        - Best for mixed objectives
+        ⭐ **Priority 5 (Highest)**
+        - Gets earliest available flight
+        - Premium customers
         
-        💰 **Revenue Max**
-        - Maximizes total revenue
-        - Uses greedy knapsack approach
+        ⭐ **Priority 3-4**
+        - Standard allocation
+        - Next available flight
         
-        📦 **Utilization Max**
-        - Maximizes capacity usage
-        - Reduces wasted space
+        ⭐ **Priority 1-2 (Lowest)**
+        - If flight is near full (>85%)
+        - Bulky cargo moves to later flights
         
-        ⭐ **Priority First**
-        - Prioritizes high-value customers
-        - Good for loyalty programs
+        ---
+        
+        **Database Updates:**
+        - `gross_weight_cargo_kg` is updated
+        - Available capacity recalculated
+        - Changes persist across sessions
         """)
+        
+        st.divider()
         
         # Dynamic pricing suggestion
         st.subheader("💵 Pricing Suggestion")
+        
+        total_capacity = 0
+        if 'available_flights' in st.session_state:
+            total_capacity = sum(f['available_weight_kg'] for f in st.session_state['available_flights'])
+        
+        st.write(f"Total Available: **{total_capacity:.0f} kg**")
         
         pred_demand = st.number_input("Predicted Demand (kg)", min_value=0.0, value=800.0, key="pricing_demand")
         confidence = st.slider("Confidence", 0.0, 1.0, 0.8, key="pricing_confidence")
@@ -558,7 +677,7 @@ def show_optimizer_page():
                 response = requests.post(
                     f"{API_BASE_URL}/marketplace/pricing-suggestion",
                     json={
-                        "available_capacity": available_weight,
+                        "available_capacity": total_capacity if total_capacity > 0 else 1000,
                         "predicted_demand": pred_demand,
                         "confidence": confidence
                     }
