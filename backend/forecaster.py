@@ -6,6 +6,7 @@ import numpy as np
 from pathlib import Path
 from typing import Dict, Tuple
 import pandas as pd
+import glob
 
 class CargoForecaster:
     """Forecaster for cargo capacity predictions."""
@@ -38,6 +39,72 @@ class CargoForecaster:
         
         self.feature_cols = model_data['feature_cols']
         self.label_encoders = model_data.get('label_encoders', {})
+    
+    def _load_aircraft_capacities(self):
+        """Load aircraft capacity mappings from CSV file."""
+        data_dir = Path(__file__).parent.parent / "data"
+        capacity_files = glob.glob(str(data_dir / "*aircraft tail*.csv"))
+        
+        self.tail_to_max_weight = {}
+        self.tail_to_max_volume = {}
+        
+        if capacity_files:
+            capacity_df = pd.read_csv(capacity_files[0])
+            capacity_df.columns = capacity_df.columns.str.strip()
+            
+            self.tail_to_max_weight = dict(zip(
+                capacity_df['Tail Number'].str.strip(),
+                capacity_df['Max Weight (Lower Deck) (kg)']
+            ))
+            self.tail_to_max_volume = dict(zip(
+                capacity_df['Tail Number'].str.strip(),
+                capacity_df['Max Volume (Lower Deck) (m³)']
+            ))
+    
+    def _calculate_remaining_cargo(self, baggage_weight_kg: float, existing_cargo_weight_kg: float,
+                                   existing_cargo_volume_m3: float, tail_number: str = None) -> float:
+        """
+        Calculate remaining cargo capacity considering both weight and volume constraints.
+        
+        Formula: remaining_cargo = min(
+            max_weight - baggage - existing_cargo_weight,
+            (max_volume - baggage_volume - existing_cargo_volume) * cargo_density
+        )
+        
+        Args:
+            baggage_weight_kg: Predicted baggage weight
+            existing_cargo_weight_kg: Current cargo weight on flight
+            existing_cargo_volume_m3: Current cargo volume on flight
+            tail_number: Aircraft tail number for capacity lookup
+            
+        Returns:
+            Remaining cargo capacity in kg (the binding constraint)
+        """
+        # Get aircraft capacities
+        if tail_number and tail_number in self.tail_to_max_weight:
+            max_weight = self.tail_to_max_weight[tail_number]
+            max_volume = self.tail_to_max_volume.get(tail_number, float('inf'))
+        else:
+            # Fallback: use default values (will need aircraft_type or estimate)
+            max_weight = 5000  # Conservative default
+            max_volume = 50  # Conservative default
+        
+        # Calculate remaining weight capacity
+        remaining_weight = max_weight - baggage_weight_kg - existing_cargo_weight_kg
+        
+        # Calculate baggage volume from weight
+        baggage_volume = baggage_weight_kg / self.BAGGAGE_DENSITY
+        
+        # Calculate remaining volume capacity
+        remaining_volume = max_volume - baggage_volume - existing_cargo_volume_m3
+        
+        # Convert remaining volume to equivalent weight
+        remaining_volume_as_weight = remaining_volume * self.CARGO_DENSITY
+        
+        # Binding constraint is the minimum (whichever is more restrictive)
+        remaining_cargo = min(remaining_weight, remaining_volume_as_weight)
+        
+        return max(0, remaining_cargo)  # Ensure non-negative
     
     def _prepare_features(self, flight_data: Dict) -> np.ndarray:
         """Convert flight data dictionary to feature array."""
@@ -88,31 +155,49 @@ class CargoForecaster:
         
         return np.std(predictions)
     
-    def predict(self, flight_data: Dict) -> Dict:
+    def predict(self, flight_data: Dict, existing_cargo_weight_kg: float = 0.0, 
+                existing_cargo_volume_m3: float = 0.0) -> Dict:
         """
-        Predict baggage weight and remaining cargo capacity using ensemble.
+        Predict baggage weight (function of passenger count) and remaining cargo capacity.
+        
+        Remaining cargo = min(max_weight, max_volume) - (baggage + cargo)
+        The binding constraint is whichever is more restrictive.
         
         Args:
-            flight_data: Dictionary with flight features
+            flight_data: Dictionary with flight features (must include passenger_count)
+            existing_cargo_weight_kg: Current cargo weight already on flight (default: 0)
+            existing_cargo_volume_m3: Current cargo volume already on flight (default: 0)
             
         Returns:
             Dictionary with predictions and confidence intervals
         """
         X = self._prepare_features(flight_data)
         
+        # Get tail number for capacity lookup if available
+        tail_number = flight_data.get('tail_number')
+        if tail_number and isinstance(tail_number, str):
+            # If tail_number is encoded, we need to decode it
+            # For now, assume it's the actual tail number string
+            pass
+        else:
+            tail_number = None
+        
         # Make predictions using ensemble or single model
         if self.use_ensemble:
-            # Ensemble prediction
+            # Ensemble prediction for baggage (function of passenger count)
             baggage_pred = self._predict_ensemble(X, self.baggage_ensemble)
-            remaining_pred = self._predict_ensemble(X, self.remaining_ensemble)
+            
+            # For remaining cargo, we'll calculate it from constraints rather than direct prediction
+            # But we can still use the model's prediction as a baseline
+            remaining_model_pred = self._predict_ensemble(X, self.remaining_ensemble)
             
             # Estimate uncertainty from ensemble variance
             baggage_std = self._get_ensemble_std(X, self.baggage_ensemble)
-            remaining_std = self._get_ensemble_std(X, self.remaining_ensemble)
+            remaining_model_std = self._get_ensemble_std(X, self.remaining_ensemble)
         else:
             # Legacy single model prediction
             baggage_pred = self.baggage_model.predict(X)[0]
-            remaining_pred = self.remaining_model.predict(X)[0]
+            remaining_model_pred = self.remaining_model.predict(X)[0]
             
             # Bootstrap for confidence intervals
             baggage_samples = []
@@ -132,34 +217,60 @@ class CargoForecaster:
                 for tree_idx in range(step, n_trees + 1, step):
                     remaining_samples.append(self.remaining_model.predict(X, num_iteration=tree_idx)[0])
             except:
-                remaining_samples = [remaining_pred]
+                remaining_samples = [remaining_model_pred]
             
             baggage_std = np.std(baggage_samples) if baggage_samples else baggage_pred * 0.1
-            remaining_std = np.std(remaining_samples) if remaining_samples else remaining_pred * 0.1
+            remaining_model_std = np.std(remaining_samples) if remaining_samples else remaining_model_pred * 0.1
         
-        # 95% confidence interval (approx)
+        # Calculate remaining cargo based on actual constraints (weight OR volume)
+        # This is what Shopee can actually sell
+        remaining_cargo = self._calculate_remaining_cargo(
+            baggage_weight_kg=baggage_pred,
+            existing_cargo_weight_kg=existing_cargo_weight_kg,
+            existing_cargo_volume_m3=existing_cargo_volume_m3,
+            tail_number=tail_number
+        )
+        
+        # For confidence intervals, propagate uncertainty from baggage prediction
+        # Use the constraint calculation with upper/lower baggage bounds
         baggage_lower = baggage_pred - 1.96 * baggage_std
         baggage_upper = baggage_pred + 1.96 * baggage_std
-        remaining_lower = remaining_pred - 1.96 * remaining_std
-        remaining_upper = remaining_pred + 1.96 * remaining_std
         
-        # Calculate confidence score (inverse of coefficient of variation)
+        # Calculate remaining cargo for lower and upper baggage bounds
+        remaining_lower = self._calculate_remaining_cargo(
+            baggage_weight_kg=baggage_upper,  # More baggage = less remaining cargo
+            existing_cargo_weight_kg=existing_cargo_weight_kg,
+            existing_cargo_volume_m3=existing_cargo_volume_m3,
+            tail_number=tail_number
+        )
+        remaining_upper = self._calculate_remaining_cargo(
+            baggage_weight_kg=baggage_lower,  # Less baggage = more remaining cargo
+            existing_cargo_weight_kg=existing_cargo_weight_kg,
+            existing_cargo_volume_m3=existing_cargo_volume_m3,
+            tail_number=tail_number
+        )
+        
+        # Calculate confidence score
         baggage_cv = baggage_std / (baggage_pred + 1e-6)
-        remaining_cv = remaining_std / (remaining_pred + 1e-6)
+        remaining_cv = remaining_model_std / (remaining_model_pred + 1e-6)
         confidence = 1.0 / (1.0 + (baggage_cv + remaining_cv) / 2)
         confidence = np.clip(confidence, 0, 1)
         
         return {
             'predicted_baggage': float(baggage_pred),
-            'predicted_baggage_lower': float(baggage_lower),
+            'predicted_baggage_lower': float(max(0, baggage_lower)),
             'predicted_baggage_upper': float(baggage_upper),
-            'remaining_cargo': float(max(0, remaining_pred)),
+            'remaining_cargo': float(remaining_cargo),
             'remaining_cargo_lower': float(max(0, remaining_lower)),
-            'remaining_cargo_upper': float(max(0, remaining_upper)),
+            'remaining_cargo_upper': float(remaining_upper),
             'confidence': float(confidence),
             'confidence_std': {
                 'baggage': float(baggage_std),
-                'remaining': float(remaining_std)
+                'remaining': float(remaining_model_std)
+            },
+            'constraint_info': {
+                'binding_constraint': 'weight' if remaining_cargo < remaining_model_pred * 1.1 else 'volume',
+                'baggage_is_function_of_passenger_count': True
             }
         }
     

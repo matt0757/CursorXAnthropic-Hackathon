@@ -114,36 +114,70 @@ def prepare_features(df):
     
     X = df[feature_cols].copy()
     
-    # Target: predict baggage_weight_kg and compute remaining cargo
+    # Target: predict baggage_weight_kg (which is a function of passenger_count)
+    # Baggage is primarily determined by passenger count
     y_baggage = df['baggage_weight_kg'].values
     
     # Calculate remaining cargo capacity
+    # Formula: capacity = min(max_weight, max_volume) - (baggage + cargo)
+    # The binding constraint is whichever is more restrictive (weight or volume)
+    
     # Load aircraft capacities
     aircraft_capacity_file = Path(__file__).parent.parent / "data" / "*aircraft tail*.csv"
     capacity_files = glob.glob(str(aircraft_capacity_file))
+    
+    # Typical density for baggage: ~160 kg/m³ (average for airline baggage)
+    BAGGAGE_DENSITY = 160  # kg/m³
+    # Typical density for cargo: ~200 kg/m³ (can vary, but use average)
+    CARGO_DENSITY = 200  # kg/m³
     
     if capacity_files:
         capacity_df = pd.read_csv(capacity_files[0])
         capacity_df.columns = capacity_df.columns.str.strip()
         
-        # Create mapping from tail_number to max weight
-        tail_to_capacity = dict(zip(
+        # Create mappings from tail_number to max capacities
+        tail_to_max_weight = dict(zip(
             capacity_df['Tail Number'].str.strip(),
             capacity_df['Max Weight (Lower Deck) (kg)']
         ))
+        tail_to_max_volume = dict(zip(
+            capacity_df['Tail Number'].str.strip(),
+            capacity_df['Max Volume (Lower Deck) (m³)']
+        ))
         
-        # Map capacities
-        df['aircraft_capacity'] = df['tail_number'].map(tail_to_capacity).fillna(
-            df['gross_weight_cargo_kg'].quantile(0.95)  # Fallback to high percentile
+        # Map capacities to dataframe
+        df['aircraft_max_weight_kg'] = df['tail_number'].map(tail_to_max_weight).fillna(
+            df.groupby('aircraft_type')['gross_weight_cargo_kg'].transform(lambda x: x.quantile(0.95))
+        )
+        df['aircraft_max_volume_m3'] = df['tail_number'].map(tail_to_max_volume).fillna(
+            df.groupby('aircraft_type')['gross_volume_cargo_m3'].transform(lambda x: x.quantile(0.95))
         )
     else:
         # Fallback: estimate capacity from data
-        df['aircraft_capacity'] = df.groupby('aircraft_type')['gross_weight_cargo_kg'].transform(
+        df['aircraft_max_weight_kg'] = df.groupby('aircraft_type')['gross_weight_cargo_kg'].transform(
+            lambda x: x.quantile(0.95)
+        )
+        df['aircraft_max_volume_m3'] = df.groupby('aircraft_type')['gross_volume_cargo_m3'].transform(
             lambda x: x.quantile(0.95)
         )
     
-    # Remaining cargo = capacity - baggage - existing cargo
-    y_remaining = (df['aircraft_capacity'] - df['baggage_weight_kg'] - df['gross_weight_cargo_kg']).values
+    # Estimate baggage volume from weight (baggage weight / baggage density)
+    df['baggage_volume_m3'] = df['baggage_weight_kg'] / BAGGAGE_DENSITY
+    
+    # Calculate remaining capacity in both weight and volume
+    # Remaining weight capacity
+    remaining_weight_capacity = df['aircraft_max_weight_kg'] - df['baggage_weight_kg'] - df['gross_weight_cargo_kg']
+    
+    # Remaining volume capacity  
+    remaining_volume_capacity = df['aircraft_max_volume_m3'] - df['baggage_volume_m3'] - df['gross_volume_cargo_m3']
+    
+    # Convert remaining volume to equivalent weight using cargo density
+    # This gives us the weight of cargo we could fit in the remaining volume
+    remaining_volume_as_weight = remaining_volume_capacity * CARGO_DENSITY
+    
+    # The binding constraint is the minimum of weight capacity and volume capacity (in weight terms)
+    # This represents the maximum cargo weight we can sell (Shopee cargo)
+    y_remaining = np.minimum(remaining_weight_capacity, remaining_volume_as_weight).values
     y_remaining = np.clip(y_remaining, 0, None)  # Ensure non-negative
     
     return X, y_baggage, y_remaining, feature_cols

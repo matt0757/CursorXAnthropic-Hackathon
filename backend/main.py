@@ -88,12 +88,29 @@ async def predict(flight_data: Dict):
     """
     Predict cargo capacity for a flight.
     
+    Formula: remaining_cargo = min(max_weight, max_volume) - (baggage + cargo)
+    - Baggage is a function of passenger_count
+    - Remaining cargo is what can be sold (e.g., to Shopee)
+    - Total capacity varies by aircraft type
+    
     Expected flight_data fields:
-    - passenger_count, year, month, day_of_week, etc.
+    - passenger_count (required): Number of passengers (determines baggage)
+    - tail_number (optional): Aircraft tail number for capacity lookup
+    - existing_cargo_weight_kg (optional): Current cargo weight already on flight (default: 0)
+    - existing_cargo_volume_m3 (optional): Current cargo volume already on flight (default: 0)
+    - year, month, day_of_week, etc.
     """
     forecaster, _ = get_forecaster()
     try:
-        result = forecaster.predict(flight_data)
+        # Extract optional existing cargo parameters
+        existing_cargo_weight = flight_data.get('existing_cargo_weight_kg', 0.0)
+        existing_cargo_volume = flight_data.get('existing_cargo_volume_m3', 0.0)
+        
+        result = forecaster.predict(
+            flight_data,
+            existing_cargo_weight_kg=existing_cargo_weight,
+            existing_cargo_volume_m3=existing_cargo_volume
+        )
         return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
