@@ -11,7 +11,7 @@ class CargoForecaster:
     """Forecaster for cargo capacity predictions."""
     
     def __init__(self, model_path: str = None):
-        """Initialize forecaster by loading trained model."""
+        """Initialize forecaster by loading trained ensemble model."""
         if model_path is None:
             model_path = Path(__file__).parent.parent / "models" / "forecaster.pkl"
         else:
@@ -23,8 +23,19 @@ class CargoForecaster:
         with open(model_path, 'rb') as f:
             model_data = pickle.load(f)
         
-        self.baggage_model = model_data['baggage_model']
-        self.remaining_model = model_data['remaining_model']
+        # Support both ensemble and single model formats
+        if 'baggage_ensemble' in model_data:
+            # New ensemble format
+            self.baggage_ensemble = model_data['baggage_ensemble']
+            self.remaining_ensemble = model_data['remaining_ensemble']
+            self.ensemble_type = model_data.get('ensemble_type', 'weighted')
+            self.use_ensemble = True
+        else:
+            # Legacy single model format
+            self.baggage_model = model_data.get('baggage_model')
+            self.remaining_model = model_data.get('remaining_model')
+            self.use_ensemble = False
+        
         self.feature_cols = model_data['feature_cols']
         self.label_encoders = model_data.get('label_encoders', {})
     
@@ -53,9 +64,33 @@ class CargoForecaster:
         X = row[self.feature_cols].values
         return X
     
+    def _predict_ensemble(self, X, ensemble_dict):
+        """Make ensemble prediction using weighted average."""
+        predictions = []
+        weights = ensemble_dict['weights']
+        models = ensemble_dict['models']
+        
+        for model_name, model in models.items():
+            pred = model.predict(X)[0]
+            weight = weights[model_name]
+            predictions.append(pred * weight)
+        
+        return np.sum(predictions)
+    
+    def _get_ensemble_std(self, X, ensemble_dict):
+        """Estimate prediction uncertainty from ensemble variance."""
+        predictions = []
+        models = ensemble_dict['models']
+        
+        for model_name, model in models.items():
+            pred = model.predict(X)[0]
+            predictions.append(pred)
+        
+        return np.std(predictions)
+    
     def predict(self, flight_data: Dict) -> Dict:
         """
-        Predict baggage weight and remaining cargo capacity.
+        Predict baggage weight and remaining cargo capacity using ensemble.
         
         Args:
             flight_data: Dictionary with flight features
@@ -65,37 +100,42 @@ class CargoForecaster:
         """
         X = self._prepare_features(flight_data)
         
-        # Make predictions
-        baggage_pred = self.baggage_model.predict(X)[0]
-        remaining_pred = self.remaining_model.predict(X)[0]
-        
-        # Bootstrap for confidence intervals (quick approximation)
-        # Use prediction intervals from LightGBM
-        # Get standard deviation from individual tree predictions
-        baggage_samples = []
-        remaining_samples = []
-        
-        # Get individual tree predictions (if available)
-        try:
-            n_trees = self.baggage_model.n_estimators_
-            # Sample from different tree subsets
-            step = max(1, n_trees // 50)  # Sample ~50 trees
-            for tree_idx in range(step, n_trees + 1, step):
-                baggage_samples.append(self.baggage_model.predict(X, num_iteration=tree_idx)[0])
-        except:
-            baggage_samples = [baggage_pred]
-        
-        try:
-            n_trees = self.remaining_model.n_estimators_
-            step = max(1, n_trees // 50)
-            for tree_idx in range(step, n_trees + 1, step):
-                remaining_samples.append(self.remaining_model.predict(X, num_iteration=tree_idx)[0])
-        except:
-            remaining_samples = [remaining_pred]
-        
-        # Calculate confidence intervals
-        baggage_std = np.std(baggage_samples) if baggage_samples else baggage_pred * 0.1
-        remaining_std = np.std(remaining_samples) if remaining_samples else remaining_pred * 0.1
+        # Make predictions using ensemble or single model
+        if self.use_ensemble:
+            # Ensemble prediction
+            baggage_pred = self._predict_ensemble(X, self.baggage_ensemble)
+            remaining_pred = self._predict_ensemble(X, self.remaining_ensemble)
+            
+            # Estimate uncertainty from ensemble variance
+            baggage_std = self._get_ensemble_std(X, self.baggage_ensemble)
+            remaining_std = self._get_ensemble_std(X, self.remaining_ensemble)
+        else:
+            # Legacy single model prediction
+            baggage_pred = self.baggage_model.predict(X)[0]
+            remaining_pred = self.remaining_model.predict(X)[0]
+            
+            # Bootstrap for confidence intervals
+            baggage_samples = []
+            remaining_samples = []
+            
+            try:
+                n_trees = self.baggage_model.n_estimators_
+                step = max(1, n_trees // 50)
+                for tree_idx in range(step, n_trees + 1, step):
+                    baggage_samples.append(self.baggage_model.predict(X, num_iteration=tree_idx)[0])
+            except:
+                baggage_samples = [baggage_pred]
+            
+            try:
+                n_trees = self.remaining_model.n_estimators_
+                step = max(1, n_trees // 50)
+                for tree_idx in range(step, n_trees + 1, step):
+                    remaining_samples.append(self.remaining_model.predict(X, num_iteration=tree_idx)[0])
+            except:
+                remaining_samples = [remaining_pred]
+            
+            baggage_std = np.std(baggage_samples) if baggage_samples else baggage_pred * 0.1
+            remaining_std = np.std(remaining_samples) if remaining_samples else remaining_pred * 0.1
         
         # 95% confidence interval (approx)
         baggage_lower = baggage_pred - 1.96 * baggage_std
@@ -124,9 +164,44 @@ class CargoForecaster:
         }
     
     def get_feature_importance(self, top_n: int = 5) -> list:
-        """Get top N most important features."""
-        importance_baggage = self.baggage_model.feature_importances_
-        importance_remaining = self.remaining_model.feature_importances_
+        """Get top N most important features from ensemble."""
+        if self.use_ensemble:
+            # Average feature importance across all models in ensemble
+            all_importances = []
+            weights = self.baggage_ensemble['weights']
+            models = self.baggage_ensemble['models']
+            
+            for model_name, model in models.items():
+                weight = weights[model_name]
+                if hasattr(model, 'feature_importances_'):
+                    # Weight the importance by model weight
+                    weighted_imp = model.feature_importances_ * weight
+                    all_importances.append(weighted_imp)
+            
+            if all_importances:
+                importance_baggage = np.sum(all_importances, axis=0)
+            else:
+                importance_baggage = np.zeros(len(self.feature_cols))
+            
+            # Same for remaining cargo
+            all_importances = []
+            weights = self.remaining_ensemble['weights']
+            models = self.remaining_ensemble['models']
+            
+            for model_name, model in models.items():
+                weight = weights[model_name]
+                if hasattr(model, 'feature_importances_'):
+                    weighted_imp = model.feature_importances_ * weight
+                    all_importances.append(weighted_imp)
+            
+            if all_importances:
+                importance_remaining = np.sum(all_importances, axis=0)
+            else:
+                importance_remaining = np.zeros(len(self.feature_cols))
+        else:
+            # Legacy single model
+            importance_baggage = self.baggage_model.feature_importances_
+            importance_remaining = self.remaining_model.feature_importances_
         
         # Average importance
         avg_importance = (importance_baggage + importance_remaining) / 2

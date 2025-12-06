@@ -14,7 +14,15 @@ warnings.filterwarnings('ignore')
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, VotingRegressor
+from sklearn.linear_model import Ridge
 import lightgbm as lgb
+try:
+    import xgboost as xgb
+    XGBOOST_AVAILABLE = True
+except ImportError:
+    XGBOOST_AVAILABLE = False
+    print("Warning: XGBoost not available. Install with: pip install xgboost")
 
 def find_csv_files():
     """Find all CSV files in the data directory."""
@@ -140,9 +148,181 @@ def prepare_features(df):
     
     return X, y_baggage, y_remaining, feature_cols
 
+def train_base_models(X_train, y_train, X_test, y_test, model_name="baggage"):
+    """Train individual base models and return their predictions."""
+    models = {}
+    predictions = {}
+    scores = {}
+    
+    print(f"\nTraining base models for {model_name}...")
+    
+    # 1. LightGBM - Excellent for tabular data, handles categoricals
+    print("  - LightGBM...")
+    lgb_model = lgb.LGBMRegressor(
+        n_estimators=200,
+        learning_rate=0.05,
+        max_depth=7,
+        num_leaves=31,
+        min_child_samples=20,
+        random_state=42,
+        verbose=-1
+    )
+    lgb_model.fit(
+        X_train, y_train,
+        eval_set=[(X_test, y_test)],
+        eval_metric='rmse',
+        callbacks=[lgb.early_stopping(20), lgb.log_evaluation(0)]
+    )
+    models['lightgbm'] = lgb_model
+    pred = lgb_model.predict(X_test)
+    predictions['lightgbm'] = pred
+    scores['lightgbm'] = {
+        'mae': mean_absolute_error(y_test, pred),
+        'rmse': np.sqrt(mean_squared_error(y_test, pred)),
+        'r2': r2_score(y_test, pred)
+    }
+    
+    # 2. Random Forest - Good baseline, robust
+    print("  - Random Forest...")
+    rf_model = RandomForestRegressor(
+        n_estimators=200,
+        max_depth=15,
+        min_samples_split=5,
+        min_samples_leaf=2,
+        random_state=42,
+        n_jobs=-1
+    )
+    rf_model.fit(X_train, y_train)
+    models['random_forest'] = rf_model
+    pred = rf_model.predict(X_test)
+    predictions['random_forest'] = pred
+    scores['random_forest'] = {
+        'mae': mean_absolute_error(y_test, pred),
+        'rmse': np.sqrt(mean_squared_error(y_test, pred)),
+        'r2': r2_score(y_test, pred)
+    }
+    
+    # 3. Gradient Boosting - Traditional boosting method
+    print("  - Gradient Boosting...")
+    gb_model = GradientBoostingRegressor(
+        n_estimators=200,
+        learning_rate=0.05,
+        max_depth=7,
+        min_samples_split=5,
+        random_state=42
+    )
+    gb_model.fit(X_train, y_train)
+    models['gradient_boosting'] = gb_model
+    pred = gb_model.predict(X_test)
+    predictions['gradient_boosting'] = pred
+    scores['gradient_boosting'] = {
+        'mae': mean_absolute_error(y_test, pred),
+        'rmse': np.sqrt(mean_squared_error(y_test, pred)),
+        'r2': r2_score(y_test, pred)
+    }
+    
+    # 4. XGBoost - If available
+    if XGBOOST_AVAILABLE:
+        print("  - XGBoost...")
+        # XGBoost 3.x uses callbacks for early stopping
+        try:
+            from xgboost import callback
+            early_stop = callback.EarlyStopping(rounds=20, save_best=True)
+            xgb_model = xgb.XGBRegressor(
+                n_estimators=200,
+                learning_rate=0.05,
+                max_depth=7,
+                min_child_weight=3,
+                random_state=42,
+                eval_metric='rmse'
+            )
+            xgb_model.fit(
+                X_train, y_train,
+                eval_set=[(X_test, y_test)],
+                callbacks=[early_stop],
+                verbose=False
+            )
+        except (ImportError, AttributeError, TypeError):
+            # Fallback: train without early stopping or use older API
+            try:
+                xgb_model = xgb.XGBRegressor(
+                    n_estimators=200,
+                    learning_rate=0.05,
+                    max_depth=7,
+                    min_child_weight=3,
+                    random_state=42,
+                    eval_metric='rmse'
+                )
+                xgb_model.fit(
+                    X_train, y_train,
+                    eval_set=[(X_test, y_test)],
+                    early_stopping_rounds=20,
+                    verbose=False
+                )
+            except TypeError:
+                # Simplest fallback: no early stopping
+                xgb_model = xgb.XGBRegressor(
+                    n_estimators=200,
+                    learning_rate=0.05,
+                    max_depth=7,
+                    min_child_weight=3,
+                    random_state=42,
+                    eval_metric='rmse'
+                )
+                xgb_model.fit(X_train, y_train, verbose=False)
+        models['xgboost'] = xgb_model
+        pred = xgb_model.predict(X_test)
+        predictions['xgboost'] = pred
+        scores['xgboost'] = {
+            'mae': mean_absolute_error(y_test, pred),
+            'rmse': np.sqrt(mean_squared_error(y_test, pred)),
+            'r2': r2_score(y_test, pred)
+        }
+    
+    # 5. Ridge Regression - Linear baseline with regularization
+    print("  - Ridge Regression...")
+    ridge_model = Ridge(alpha=1.0, random_state=42)
+    ridge_model.fit(X_train, y_train)
+    models['ridge'] = ridge_model
+    pred = ridge_model.predict(X_test)
+    predictions['ridge'] = pred
+    scores['ridge'] = {
+        'mae': mean_absolute_error(y_test, pred),
+        'rmse': np.sqrt(mean_squared_error(y_test, pred)),
+        'r2': r2_score(y_test, pred)
+    }
+    
+    # Print individual model scores
+    print(f"\n  Individual Model Performance ({model_name}):")
+    for model_name_key, score in scores.items():
+        print(f"    {model_name_key:20s} - MAE: {score['mae']:8.2f}, RMSE: {score['rmse']:8.2f}, R²: {score['r2']:.4f}")
+    
+    return models, predictions, scores
+
+def create_weighted_ensemble(models, predictions, scores):
+    """Create weighted ensemble based on model performance."""
+    # Calculate weights based on inverse RMSE (lower RMSE = higher weight)
+    weights = {}
+    total_inv_rmse = 0
+    
+    for model_name, score in scores.items():
+        inv_rmse = 1.0 / (score['rmse'] + 1e-6)  # Add small epsilon to avoid division by zero
+        weights[model_name] = inv_rmse
+        total_inv_rmse += inv_rmse
+    
+    # Normalize weights
+    for model_name in weights:
+        weights[model_name] /= total_inv_rmse
+    
+    print(f"\n  Ensemble weights:")
+    for model_name, weight in weights.items():
+        print(f"    {model_name:20s}: {weight:.4f}")
+    
+    return weights
+
 def train_model(X, y_baggage, y_remaining, feature_cols):
-    """Train LightGBM models for baggage and remaining cargo prediction."""
-    print("\n=== Model Training ===")
+    """Train ensemble models for baggage and remaining cargo prediction."""
+    print("\n=== Model Training (Ensemble) ===")
     
     # Split data
     X_train, X_test, y_baggage_train, y_baggage_test = train_test_split(
@@ -155,72 +335,73 @@ def train_model(X, y_baggage, y_remaining, feature_cols):
     print(f"Training set: {X_train.shape[0]} samples")
     print(f"Test set: {X_test.shape[0]} samples")
     
-    # Train baggage weight model
-    print("\nTraining baggage weight model...")
-    model_baggage = lgb.LGBMRegressor(
-        n_estimators=200,
-        learning_rate=0.05,
-        max_depth=7,
-        random_state=42,
-        verbose=-1
-    )
-    model_baggage.fit(
-        X_train, y_baggage_train,
-        eval_set=[(X_test, y_baggage_test)],
-        eval_metric='rmse',
-        callbacks=[lgb.early_stopping(20), lgb.log_evaluation(0)]
+    # Train base models for baggage
+    models_baggage, preds_baggage, scores_baggage = train_base_models(
+        X_train, y_baggage_train, X_test, y_baggage_test, "baggage"
     )
     
-    # Train remaining cargo model
-    print("Training remaining cargo model...")
-    model_remaining = lgb.LGBMRegressor(
-        n_estimators=200,
-        learning_rate=0.05,
-        max_depth=7,
-        random_state=42,
-        verbose=-1
-    )
-    model_remaining.fit(
-        X_train, y_remaining_train,
-        eval_set=[(X_test, y_remaining_test)],
-        eval_metric='rmse',
-        callbacks=[lgb.early_stopping(20), lgb.log_evaluation(0)]
+    # Train base models for remaining cargo
+    models_remaining, preds_remaining, scores_remaining = train_base_models(
+        X_train, y_remaining_train, X_test, y_remaining_test, "remaining_cargo"
     )
     
-    # Evaluate models
-    print("\n=== Model Evaluation ===")
+    # Create weighted ensembles
+    weights_baggage = create_weighted_ensemble(models_baggage, preds_baggage, scores_baggage)
+    weights_remaining = create_weighted_ensemble(models_remaining, preds_remaining, scores_remaining)
     
-    y_baggage_pred = model_baggage.predict(X_test)
-    print(f"\nBaggage Weight Model:")
-    print(f"  MAE: {mean_absolute_error(y_baggage_test, y_baggage_pred):.2f} kg")
-    print(f"  RMSE: {np.sqrt(mean_squared_error(y_baggage_test, y_baggage_pred)):.2f} kg")
-    print(f"  R²: {r2_score(y_baggage_test, y_baggage_pred):.4f}")
+    # Evaluate ensemble predictions
+    print("\n=== Ensemble Evaluation ===")
     
-    y_remaining_pred = model_remaining.predict(X_test)
-    print(f"\nRemaining Cargo Model:")
-    print(f"  MAE: {mean_absolute_error(y_remaining_test, y_remaining_pred):.2f} kg")
-    print(f"  RMSE: {np.sqrt(mean_squared_error(y_remaining_test, y_remaining_pred)):.2f} kg")
-    print(f"  R²: {r2_score(y_remaining_test, y_remaining_pred):.4f}")
+    # Baggage ensemble prediction
+    ensemble_pred_baggage = np.zeros(len(y_baggage_test))
+    for model_name, pred in preds_baggage.items():
+        ensemble_pred_baggage += weights_baggage[model_name] * pred
     
-    return model_baggage, model_remaining, feature_cols
+    print(f"\nBaggage Weight Ensemble:")
+    print(f"  MAE: {mean_absolute_error(y_baggage_test, ensemble_pred_baggage):.2f} kg")
+    print(f"  RMSE: {np.sqrt(mean_squared_error(y_baggage_test, ensemble_pred_baggage)):.2f} kg")
+    print(f"  R²: {r2_score(y_baggage_test, ensemble_pred_baggage):.4f}")
+    
+    # Remaining cargo ensemble prediction
+    ensemble_pred_remaining = np.zeros(len(y_remaining_test))
+    for model_name, pred in preds_remaining.items():
+        ensemble_pred_remaining += weights_remaining[model_name] * pred
+    
+    print(f"\nRemaining Cargo Ensemble:")
+    print(f"  MAE: {mean_absolute_error(y_remaining_test, ensemble_pred_remaining):.2f} kg")
+    print(f"  RMSE: {np.sqrt(mean_squared_error(y_remaining_test, ensemble_pred_remaining)):.2f} kg")
+    print(f"  R²: {r2_score(y_remaining_test, ensemble_pred_remaining):.4f}")
+    
+    # Package ensemble models
+    ensemble_baggage = {
+        'models': models_baggage,
+        'weights': weights_baggage
+    }
+    ensemble_remaining = {
+        'models': models_remaining,
+        'weights': weights_remaining
+    }
+    
+    return ensemble_baggage, ensemble_remaining, feature_cols
 
-def save_model(model_baggage, model_remaining, feature_cols, label_encoders):
-    """Save trained models and metadata."""
+def save_model(ensemble_baggage, ensemble_remaining, feature_cols, label_encoders):
+    """Save trained ensemble models and metadata."""
     models_dir = Path(__file__).parent.parent / "models"
     models_dir.mkdir(exist_ok=True)
     
     model_data = {
-        'baggage_model': model_baggage,
-        'remaining_model': model_remaining,
+        'baggage_ensemble': ensemble_baggage,
+        'remaining_ensemble': ensemble_remaining,
         'feature_cols': feature_cols,
-        'label_encoders': label_encoders
+        'label_encoders': label_encoders,
+        'ensemble_type': 'weighted'
     }
     
     model_path = models_dir / "forecaster.pkl"
     with open(model_path, 'wb') as f:
         pickle.dump(model_data, f)
     
-    print(f"\n✓ Models saved to {model_path}")
+    print(f"\n✓ Ensemble models saved to {model_path}")
 
 def main():
     """Main training pipeline."""
@@ -237,11 +418,11 @@ def main():
     # Prepare features
     X, y_baggage, y_remaining, feature_cols = prepare_features(df)
     
-    # Train models
-    model_baggage, model_remaining, feature_cols = train_model(X, y_baggage, y_remaining, feature_cols)
+    # Train ensemble models
+    ensemble_baggage, ensemble_remaining, feature_cols = train_model(X, y_baggage, y_remaining, feature_cols)
     
-    # Save models
-    save_model(model_baggage, model_remaining, feature_cols, label_encoders)
+    # Save ensemble models
+    save_model(ensemble_baggage, ensemble_remaining, feature_cols, label_encoders)
     
     print("\n" + "=" * 60)
     print("Training complete!")
