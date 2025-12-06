@@ -41,6 +41,13 @@ class CargoForecaster:
         
         self.feature_cols = model_data['feature_cols']
         self.label_encoders = model_data.get('label_encoders', {})
+        
+        # Load aircraft capacities
+        self._load_aircraft_capacities()
+        
+        # Constants
+        self.BAGGAGE_DENSITY = 160  # kg/m³ (average for airline baggage)
+        self.CARGO_DENSITY = 200  # kg/m³ (average for cargo)
     
     def _load_aircraft_capacities(self):
         """Load aircraft capacity mappings from CSV file."""
@@ -101,22 +108,45 @@ class CargoForecaster:
         remaining_volume = max_volume - baggage_volume - existing_cargo_volume_m3
         
         # Convert remaining volume to equivalent weight
-        remaining_volume_as_weight = remaining_volume * self.CARGO_DENSITY
-        
-        # Binding constraint is the minimum (whichever is more restrictive)
-        remaining_cargo = min(remaining_weight, remaining_volume_as_weight)
-        
-        return max(0, remaining_cargo)  # Ensure non-negative
-    
     def _prepare_features(self, flight_data: Dict) -> np.ndarray:
         """Convert flight data dictionary to feature array."""
         # Create a DataFrame row from the input
         row = pd.DataFrame([flight_data])
         
-        # Encode categorical variables
+        # Handle aircraft_type and tail_number if provided as strings (not encoded)
+        if 'aircraft_type' in row.columns and 'aircraft_type' in self.label_encoders:
+            if 'aircraft_type_encoded' not in row.columns:
+                try:
+                    row['aircraft_type_encoded'] = self.label_encoders['aircraft_type'].transform([str(row['aircraft_type'].iloc[0])])[0]
+                except (ValueError, KeyError):
+                    row['aircraft_type_encoded'] = 0
+        
+        if 'tail_number' in row.columns and 'tail_number' in self.label_encoders:
+            if 'tail_number_encoded' not in row.columns:
+                try:
+                    row['tail_number_encoded'] = self.label_encoders['tail_number'].transform([str(row['tail_number'].iloc[0])])[0]
+                except (ValueError, KeyError):
+                    row['tail_number_encoded'] = 0
+        
+        # Handle origin and destination
+        if 'origin' in row.columns and 'origin' in self.label_encoders:
+            if 'origin_encoded' not in row.columns:
+                try:
+                    row['origin_encoded'] = self.label_encoders['origin'].transform([str(row['origin'].iloc[0])])[0]
+                except (ValueError, KeyError):
+                    row['origin_encoded'] = 0
+        
+        if 'destination' in row.columns and 'destination' in self.label_encoders:
+            if 'destination_encoded' not in row.columns:
+                try:
+                    row['destination_encoded'] = self.label_encoders['destination'].transform([str(row['destination'].iloc[0])])[0]
+                except (ValueError, KeyError):
+                    row['destination_encoded'] = 0
+        
+        # Encode any other categorical variables
         for col, encoder in self.label_encoders.items():
             col_name = f'{col}_encoded'
-            if col in row.columns:
+            if col in row.columns and col_name not in row.columns:
                 try:
                     # Try to transform, if value not seen, use most common
                     row[col_name] = encoder.transform([str(row[col].iloc[0])])[0]
@@ -132,6 +162,7 @@ class CargoForecaster:
         # Select features in correct order
         X = row[self.feature_cols].values
         return X
+        return X
     
     def _predict_ensemble(self, X, ensemble_dict):
         """Make ensemble prediction using weighted average."""
@@ -146,18 +177,8 @@ class CargoForecaster:
         
         return np.sum(predictions)
     
-    def _get_ensemble_std(self, X, ensemble_dict):
-        """Estimate prediction uncertainty from ensemble variance."""
-        predictions = []
-        models = ensemble_dict['models']
-        
-        for model_name, model in models.items():
-            pred = model.predict(X)[0]
-            predictions.append(pred)
-        
-        return np.std(predictions)
-    
-    def predict(self, flight_data: Dict, existing_cargo_weight_kg: float = 0.0, 
+    def predict(self, flight_data: Dict, 
+                existing_cargo_weight_kg: float = 0.0, 
                 existing_cargo_volume_m3: float = 0.0) -> Dict:
         """
         Predict baggage weight, cargo demand, and remaining cargo capacity.

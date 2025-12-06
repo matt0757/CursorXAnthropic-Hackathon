@@ -93,10 +93,10 @@ def show_forecast_page():
     
     with col2:
         st.subheader("Aircraft Details")
-        fuel_weight = st.number_input("Fuel Weight (kg)", min_value=1000, max_value=50000, value=5000)
-        fuel_price = st.number_input("Fuel Price per kg", min_value=0.5, max_value=5.0, value=0.85, step=0.01)
-        cargo_price = st.number_input("Cargo Price per kg", min_value=0.5, max_value=10.0, value=1.5, step=0.01)
-    
+        
+        # Aircraft type and tail number
+        aircraft_type = st.text_input("Aircraft Type (optional)", placeholder="e.g., A330-300", help="Leave blank to use defaults")
+        tail_number = st.text_input("Tail Number (optional)", placeholder="e.g., 9M-XXX", help="Leave blank to use defaults")
     if st.button("🚀 Get Forecast", type="primary"):
         flight_data = {
             "passenger_count": passenger_count,
@@ -109,14 +109,30 @@ def show_forecast_page():
             "holiday_flag": holiday_flag,
             "delay_probability": delay_probability,
             "weather_index": weather_index,
-            "origin_encoded": 0,
-            "destination_encoded": 0,
-            "tail_number_encoded": 0,
-            "aircraft_type_encoded": 0,
             "fuel_weight_kg": fuel_weight,
             "fuel_price_per_kg": fuel_price,
             "cargo_price_per_kg": cargo_price
         }
+        
+        # Add optional fields if provided
+        if aircraft_type:
+            flight_data["aircraft_type"] = aircraft_type
+        if tail_number:
+            flight_data["tail_number"] = tail_number
+        if origin:
+            flight_data["origin"] = origin
+        if destination:
+            flight_data["destination"] = destination
+        
+        # Add default encoded values if not using actual values
+        if not aircraft_type:
+            flight_data["aircraft_type_encoded"] = 0
+        if not tail_number:
+            flight_data["tail_number_encoded"] = 0
+        if not origin:
+            flight_data["origin_encoded"] = 0
+        if not destination:
+            flight_data["destination_encoded"] = 0
         
         try:
             response = requests.post(f"{API_BASE_URL}/predict", json=flight_data)
