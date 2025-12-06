@@ -24,16 +24,10 @@ A comprehensive solution for predicting cargo capacity, optimizing cargo allocat
    - 4 pricing tiers: Discount → Normal → Premium → Surge
    - Confidence-adjusted pricing
 
-### 4. **What-If Simulator**
-   - Interactive scenario testing
-   - Real-time prediction updates
-   - Impact analysis
-
-### 5. **Frontend (Streamlit)**
-   - **Forecast Page**: Get capacity predictions
-   - **What-If Simulator**: Test scenarios
-   - **Marketplace**: Generate and reserve slots
+### 4. **Frontend (Streamlit)**
+   - **Forecast Page**: Get capacity predictions with adjustable parameters
    - **Cargo Optimizer** ⭐ NEW: Optimize allocation with visualizations
+   - **Marketplace**: Generate and reserve slots
 
 ## 📁 Project Structure
 
@@ -215,10 +209,9 @@ Built for the CursorXAnthropic Hackathon MVP.
 │   ├── forecaster.py        # ML predictor with cargo demand
 │   ├── optimizer.py         # ⭐ NEW: Cargo allocation optimizer
 │   ├── marketplace.py       # Marketplace + optimization integration
-│   ├── simulator.py         # What-If simulator
 │   └── train_model.py       # ML training (ensemble models)
 ├── frontend/
-│   └── streamlit_app.py     # UI (4 pages including Cargo Optimizer)
+│   └── streamlit_app.py     # UI (3 pages: Forecast, Cargo Optimizer, Marketplace)
 ├── models/
 │   └── forecaster.pkl       # Trained models (generated after training)
 ├── data/

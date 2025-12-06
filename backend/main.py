@@ -8,12 +8,11 @@ from typing import Optional, Dict, List
 import uvicorn
 
 from .forecaster import CargoForecaster
-from .simulator import WhatIfSimulator
 from .marketplace import CargoMarketplace
 
 app = FastAPI(
     title="Cargo Capacity Forecaster API",
-    description="Dynamic Cargo Capacity Forecaster + What-If Simulator + Cargo Marketplace",
+    description="Dynamic Cargo Capacity Forecaster + Cargo Optimizer + Marketplace",
     version="1.0.0"
 )
 
@@ -28,28 +27,22 @@ app.add_middleware(
 
 # Initialize components
 forecaster = None
-simulator = None
 marketplace = CargoMarketplace()
 
 def get_forecaster():
     """Lazy load forecaster (loads model on first use)."""
-    global forecaster, simulator
+    global forecaster
     if forecaster is None:
         try:
             forecaster = CargoForecaster()
-            simulator = WhatIfSimulator(forecaster)
         except FileNotFoundError as e:
             raise HTTPException(
                 status_code=503,
                 detail=f"Model not loaded. Please train the model first: {str(e)}"
             )
-    return forecaster, simulator
+    return forecaster
 
 # Pydantic schemas
-class SimulationRequest(BaseModel):
-    changes: Dict
-    base_template: Optional[Dict] = None
-
 class MarketplaceGenerateRequest(BaseModel):
     predicted_cargo: float
     confidence: float = 0.8
@@ -78,7 +71,8 @@ async def root():
         "endpoints": {
             "health": "/health",
             "predict": "/predict",
-            "simulate": "/simulate",
+            "optimize": "/marketplace/optimize",
+            "pricing": "/marketplace/pricing-suggestion",
             "generate_slots": "/marketplace/generate-slots",
             "reserve": "/marketplace/reserve/{slot_id}",
             "docs": "/docs"
@@ -99,7 +93,7 @@ async def predict(flight_data: Dict):
     """
     Predict cargo capacity for a flight.
     
-    New features:
+    Features:
     - Predicts baggage weight (function of passenger_count)
     - Predicts cargo demand (future cargo bookings)
     - Predicts cargo volume
@@ -112,7 +106,7 @@ async def predict(flight_data: Dict):
     - existing_cargo_volume_m3 (optional): Current cargo volume already on flight (default: 0)
     - year, month, day_of_week, etc.
     """
-    forecaster, _ = get_forecaster()
+    forecaster = get_forecaster()
     try:
         # Extract optional existing cargo parameters
         existing_cargo_weight = flight_data.get('existing_cargo_weight_kg', 0.0)
@@ -123,20 +117,6 @@ async def predict(flight_data: Dict):
             existing_cargo_weight_kg=existing_cargo_weight,
             existing_cargo_volume_m3=existing_cargo_volume
         )
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@app.post("/simulate")
-async def simulate(request: SimulationRequest):
-    """
-    What-If Simulator endpoint.
-    
-    Apply scenario changes and get updated predictions.
-    """
-    _, simulator = get_forecaster()
-    try:
-        result = simulator.simulate(request.changes, request.base_template)
         return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -185,7 +165,7 @@ async def get_reservation(slot_id: str):
 @app.get("/feature-importance")
 async def feature_importance():
     """Get feature importance for explainability."""
-    forecaster, _ = get_forecaster()
+    forecaster = get_forecaster()
     try:
         top_features = forecaster.get_feature_importance(top_n=10)
         return {"top_features": top_features}
@@ -235,4 +215,3 @@ async def get_pricing_suggestion(request: PricingSuggestionRequest):
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
-

@@ -58,13 +58,13 @@ def main():
     st.sidebar.title("Navigation")
     page = st.sidebar.radio(
         "Choose a page",
-        ["Forecast", "What-If Simulator", "Marketplace", "Cargo Optimizer"]
+        ["Forecast", "Cargo Optimizer", "Marketplace"]
     )
     
     if page == "Forecast":
         show_forecast_page()
-    elif page == "What-If Simulator":
-        show_simulator_page()
+    elif page == "Cargo Optimizer":
+        show_optimizer_page()
     elif page == "Marketplace":
         show_marketplace_page()
     elif page == "Cargo Optimizer":
@@ -226,129 +226,6 @@ def show_forecast_page():
         
         except Exception as e:
             st.error(f"Failed to connect to API: {str(e)}")
-
-def show_simulator_page():
-    """What-If Simulator page."""
-    st.header("🔮 What-If Simulator")
-    st.markdown("Adjust scenario parameters to see how predictions change in real-time.")
-    
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        st.subheader("Scenario Parameters")
-        
-        col_a, col_b = st.columns(2)
-        
-        with col_a:
-            expected_passengers = st.slider(
-                "Expected Passengers",
-                min_value=50,
-                max_value=400,
-                value=150,
-                key="sim_passengers"
-            )
-            
-            group_travel_ratio = st.slider(
-                "Group Travel Ratio",
-                0.0,
-                1.0,
-                0.2,
-                step=0.05,
-                key="sim_group"
-            )
-        
-        with col_b:
-            holiday_flag = st.selectbox(
-                "Holiday Flag",
-                options=[0, 1],
-                format_func=lambda x: "Regular Day" if x == 0 else "Holiday",
-                key="sim_holiday"
-            )
-            
-            delay_probability = st.slider(
-                "Delay Probability",
-                0.0,
-                1.0,
-                0.1,
-                step=0.05,
-                key="sim_delay"
-            )
-        
-        if st.button("🔄 Run Simulation", type="primary"):
-            changes = {
-                "expected_passengers": expected_passengers,
-                "group_travel_ratio": group_travel_ratio,
-                "holiday_flag": holiday_flag,
-                "delay_probability": delay_probability
-            }
-            
-            try:
-                response = requests.post(
-                    f"{API_BASE_URL}/simulate",
-                    json={"changes": changes}
-                )
-                
-                if response.status_code == 200:
-                    result = response.json()
-                    
-                    st.success("✅ Simulation Complete!")
-                    
-                    # Display results
-                    col1, col2, col3 = st.columns(3)
-                    
-                    with col1:
-                        st.metric(
-                            "Predicted Baggage",
-                            f"{result['predicted_baggage']:.0f} kg"
-                        )
-                    
-                    with col2:
-                        st.metric(
-                            "Remaining Cargo",
-                            f"{result['remaining_cargo']:.0f} kg"
-                        )
-                    
-                    with col3:
-                        confidence_color = "🟢" if result['confidence'] > 0.7 else "🟡" if result['confidence'] > 0.4 else "🔴"
-                        st.metric(
-                            "Confidence",
-                            f"{confidence_color} {result['confidence']:.1%}"
-                        )
-                    
-                    # Explanation
-                    st.subheader("📋 Explanation")
-                    
-                    explanation = result.get('explanation', {})
-                    top_factors = explanation.get('top_factors', [])
-                    
-                    st.markdown("**Top Contributing Factors:**")
-                    for i, factor in enumerate(top_factors, 1):
-                        st.markdown(f"{i}. **{factor}**")
-                    
-                    # Confidence intervals
-                    if 'prediction_details' in result:
-                        details = result['prediction_details']
-                        st.markdown("**Confidence Intervals:**")
-                        st.json(details)
-                
-                else:
-                    st.error(f"Error: {response.text}")
-            
-            except Exception as e:
-                st.error(f"Failed to connect to API: {str(e)}")
-    
-    with col2:
-        st.subheader("💡 Tips")
-        st.info("""
-        **What-If Simulator Guide:**
-        
-        - **Passengers**: More passengers = more baggage
-        - **Group Travel**: Higher ratio = more coordinated baggage
-        - **Holidays**: Often increase passenger loads
-        - **Delays**: Can affect cargo capacity planning
-        
-        Adjust parameters and click "Run Simulation" to see updated predictions!
-        """)
 
 def show_marketplace_page():
     """Marketplace page."""
