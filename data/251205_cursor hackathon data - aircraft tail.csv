@@ -1,0 +1,8 @@
+Tail Number,Aircraft Type,Max Weight (Lower Deck) (kg),Max Volume (Lower Deck) (m³),Max Weight (Main Deck) (kg),Max Volume (Main Deck) (m³),Max Total Weight (kg),Max Volume Weight (kg),Max Takeoff Weight (kg),Zero Fuel Weight (kg)
+TN-ZNA,Airbus A330-300,14500,132,N/A,N/A,14500,14500,233000,178000
+TN-ZFB,Airbus A330-300,14800,135,N/A,N/A,14800,14800,233000,179000
+TN-ZND,Airbus A330-200,13200,118,N/A,N/A,13200,13200,230000,174000
+TN-ZSD,Airbus A330-200,13500,120,N/A,N/A,13500,13500,230000,175000
+TN-ZNB,Boeing 737-800,1800,44,N/A,N/A,1800,1800,79010,62820
+TN-ZZB,Boeing 737-800,1850,45,N/A,N/A,1850,1850,79010,62900
+TN-ZNC,Boeing 737-900ER,2100,52,N/A,N/A,2100,2100,85130,66950
