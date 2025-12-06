@@ -8,5 +8,5 @@ if __name__ == "__main__":
     subprocess.run([
         sys.executable, "-m", "streamlit", "run",
         "frontend/cargo_tms_app.py",
-        "--server.port", "8502"
+        "--server.port", "8503"
     ])
