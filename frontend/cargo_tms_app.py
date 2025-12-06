@@ -410,27 +410,8 @@ def main():
 def show_home_dashboard(api_status):
     """Home dashboard with overview."""
     
-    # Real-time simulation controls
-    col_refresh1, col_refresh2, col_refresh3 = st.columns([1, 1, 6])
-    with col_refresh1:
-        if st.button("🔄 Refresh", key="home_refresh_btn"):
-            st.session_state['home_last_update'] = time.time()
-            st.session_state.pop('home_flights', None)
-            st.session_state.pop('home_requests', None)
-            st.rerun()
-    with col_refresh2:
-        auto_refresh = st.checkbox("Auto", value=st.session_state.get('home_auto_refresh', False), key="home_auto_check")
-        st.session_state['home_auto_refresh'] = auto_refresh
-    
-    # Auto-refresh logic (every 2 seconds)
-    if auto_refresh:
-        last_update = st.session_state.get('home_last_update', 0)
-        if time.time() - last_update > 2:
-            st.session_state['home_last_update'] = time.time()
-            st.session_state.pop('home_flights', None)
-            st.session_state.pop('home_requests', None)
-            time.sleep(0.1)  # Small delay to prevent racing
-            st.rerun()
+    # Real-time simulation toggle
+    auto_refresh = st.toggle("🔄 Auto-refresh (3s)", value=False, key="home_auto_refresh")
     
     # API Status Banner
     if not api_status:
@@ -469,10 +450,7 @@ def show_home_dashboard(api_status):
     with col_left:
         st.markdown("### 🛫 Active Flights")
         
-        # Cache flights in session state
-        if 'home_flights' not in st.session_state:
-            st.session_state['home_flights'] = get_mock_flights()[:4]
-        flights = st.session_state['home_flights']
+        flights = get_mock_flights()[:4]
         
         for flight in flights:
             with st.container():
@@ -515,10 +493,7 @@ def show_home_dashboard(api_status):
     with col_right:
         st.markdown("### 📦 Pending Cargo Requests")
         
-        # Cache requests in session state
-        if 'home_requests' not in st.session_state:
-            st.session_state['home_requests'] = get_mock_cargo_requests()[:5]
-        requests = st.session_state['home_requests']
+        requests = get_mock_cargo_requests()[:5]
         
         for req in requests:
             with st.container():
@@ -540,6 +515,11 @@ def show_home_dashboard(api_status):
         
         if st.button("View All Requests →", use_container_width=True):
             st.info("Navigate to Cargo Planning tab")
+    
+    # Auto-refresh: wait 3 seconds then rerun
+    if auto_refresh:
+        time.sleep(3)
+        st.rerun()
 
 
 def show_mesh_flights():
@@ -673,23 +653,8 @@ def show_mesh_flights():
 def show_flight_services(api_status):
     """Flight services status and management."""
     
-    # Real-time simulation controls
-    col_refresh1, col_refresh2, col_refresh3 = st.columns([1, 1, 6])
-    with col_refresh1:
-        if st.button("🔄 Refresh", key="services_refresh_btn"):
-            st.session_state['services_last_update'] = time.time()
-            st.rerun()
-    with col_refresh2:
-        auto_refresh = st.checkbox("Auto", value=st.session_state.get('services_auto_refresh', False), key="services_auto_check")
-        st.session_state['services_auto_refresh'] = auto_refresh
-    
-    # Auto-refresh logic (every 2 seconds)
-    if auto_refresh:
-        last_update = st.session_state.get('services_last_update', 0)
-        if time.time() - last_update > 2:
-            st.session_state['services_last_update'] = time.time()
-            time.sleep(0.1)
-            st.rerun()
+    # Real-time simulation toggle
+    auto_refresh = st.toggle("🔄 Auto-refresh (3s)", value=False, key="services_auto_refresh")
     
     st.markdown("### 🔄 Flight Services Status")
     
@@ -853,6 +818,11 @@ def show_flight_services(api_status):
         else:
             st.info("🔌 Connect to the Forecasting API for AI-powered predictions")
             st.code("uvicorn backend.main:app --reload")
+    
+    # Auto-refresh: wait 3 seconds then rerun
+    if auto_refresh:
+        time.sleep(3)
+        st.rerun()
 
 
 def show_cargo_planning(api_status):
