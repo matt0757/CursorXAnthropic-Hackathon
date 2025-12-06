@@ -10,38 +10,46 @@ Based on the dataset characteristics:
 
 ## Selected Models
 
-### 1. **LightGBM** (Primary)
+### 1. **LightGBM** (Primary - Typically Highest Weight)
 - **Why**: Excellent for tabular data, handles categorical features natively
 - **Strengths**: Fast training, good performance, handles missing values well
 - **Hyperparameters**: 
   - `n_estimators=200`, `learning_rate=0.05`, `max_depth=7`
-  - Early stopping with validation set
+  - `num_leaves=31`, `min_child_samples=20`
+  - Early stopping with 20 rounds patience
+  - Trained with validation set monitoring
 
 ### 2. **Random Forest** (Robust Baseline)
 - **Why**: Robust, handles mixed data types, provides feature importance
-- **Strengths**: Less prone to overfitting, good for smaller datasets
+- **Strengths**: Less prone to overfitting, good variance reduction
 - **Hyperparameters**:
   - `n_estimators=200`, `max_depth=15`
-  - Bootstrap sampling for variance reduction
+  - `min_samples_split=5`, `min_samples_leaf=2`
+  - Bootstrap sampling enabled
+  - Parallel training (`n_jobs=-1`)
 
 ### 3. **Gradient Boosting** (Traditional Boosting)
-- **Why**: Complements tree-based models, different error patterns
-- **Strengths**: Sequential learning, captures complex patterns
+- **Why**: Complements tree-based models, captures different patterns
+- **Strengths**: Sequential learning, gradient-based optimization
 - **Hyperparameters**:
   - `n_estimators=200`, `learning_rate=0.05`, `max_depth=7`
+  - `min_samples_split=5`
 
-### 4. **XGBoost** (If Available)
-- **Why**: Often performs slightly differently than LightGBM, good complement
-- **Strengths**: Robust to outliers, handles regularization well
+### 4. **XGBoost** (Optional - If Installed)
+- **Why**: Often performs differently than LightGBM, adds diversity
+- **Strengths**: Robust to outliers, regularization, sparsity-aware
 - **Hyperparameters**:
   - `n_estimators=200`, `learning_rate=0.05`, `max_depth=7`
-  - Early stopping enabled
+  - `min_child_weight=3`
+  - Early stopping with 20 rounds
+- **Note**: Gracefully skipped if not installed (not required)
 
 ### 5. **Ridge Regression** (Linear Baseline)
 - **Why**: Provides linear baseline, handles multicollinearity
-- **Strengths**: Fast, interpretable, regularization prevents overfitting
+- **Strengths**: Fast, interpretable, L2 regularization
 - **Hyperparameters**:
-  - `alpha=1.0` (L2 regularization)
+  - `alpha=1.0` (L2 penalty)
+  - Provides sanity check against tree-based models
 
 ## Ensemble Strategy
 
@@ -62,24 +70,66 @@ Based on the dataset characteristics:
 
 ## Training Process
 
-1. **Data Preparation**: 
-   - Load and combine datasets
-   - Feature engineering (temporal, encoded categoricals)
-   - Train/test split (80/20)
+### 1. **Data Preparation**
+- **Load Data**: Automatically finds all CSV files in `data/` folder (excluding aircraft tail reference)
+- **Combine Datasets**: Concatenates 2023 and 2024 sample data (~3000+ records)
+- **Temporal Features**: Extract year, month, day_of_week, day_of_month, is_weekend from flight_date
+- **Derived Features**: 
+  - `bags_per_passenger` = baggage_weight / (passenger_count + 1)
+  - `cargo_per_passenger` = cargo_weight / (passenger_count + 1)
+- **Mock Scenario Features** (for what-if analysis):
+  - `group_travel_ratio` (Beta distribution)
+  - `holiday_flag` (binary, 15% probability)
+  - `delay_probability` (Beta distribution)
+  - `weather_index` (Normal distribution, clipped 0-1)
+- **Encoding**: LabelEncoder for categorical features (origin, destination, tail_number, aircraft_type)
+- **Missing Values**: Median imputation for numeric, 'UNKNOWN' for categorical
+- **Train/Test Split**: 80/20
 
-2. **Base Model Training**:
-   - Train each model independently
-   - Evaluate on validation set
-   - Record individual performance metrics
+### 2. **Target Calculation**
+- **Baggage Weight**: Direct from dataset (function of passenger_count)
+- **Cargo Demand**: Historical `gross_weight_cargo_kg`
+- **Cargo Volume**: Historical `gross_volume_cargo_m3`
+- **Remaining Capacity**: Calculated using dual constraints:
+  ```python
+  remaining_weight = max_weight - baggage - cargo
+  remaining_volume_as_weight = (max_volume - baggage_vol - cargo_vol) * 200
+  remaining = min(remaining_weight, remaining_volume_as_weight)
+  ```
+- Aircraft capacities loaded from `aircraft tail.csv` or estimated from 95th percentile
 
-3. **Weight Calculation**:
-   - Compute RMSE for each model
-   - Calculate inverse RMSE weights
-   - Normalize weights
+### 3. **Ensemble Training** (Repeated for Each Target)
+For each target (baggage, cargo_demand, cargo_volume, remaining):
+1. Train 5 base models independently
+2. Make predictions on test set
+3. Calculate RMSE for each model
+4. Compute inverse RMSE weights: `weight = (1/RMSE) / sum(1/RMSE)`
+5. Normalize weights to sum to 1.0
+6. Store all models + weights
 
-4. **Ensemble Prediction**:
-   - Weighted average of all model predictions
-   - Estimate uncertainty from ensemble variance
+### 4. **Model Persistence**
+```python
+model_data = {
+    'baggage_ensemble': {'models': {...}, 'weights': {...}},
+    'cargo_demand_ensemble': {'models': {...}, 'weights': {...}},
+    'cargo_volume_ensemble': {'models': {...}, 'weights': {...}},
+    'remaining_ensemble': {'models': {...}, 'weights': {...}},
+    'ensemble_type': 'weighted',
+    'feature_cols': [...],
+    'label_encoders': {...}
+}
+```
+Saved to `models/forecaster.pkl` using pickle
+
+### 5. **Inference (Prediction)**
+- Load ensemble from pickle file
+- Prepare features (encode categoricals, fill missing)
+- For each target:
+  - Get prediction from each base model
+  - Compute weighted average: `pred = sum(weight_i * pred_i)`
+  - Calculate ensemble std dev for confidence intervals
+- Calculate constraint-based remaining capacity
+- Return predictions + 95% CI + confidence score
 
 ## Expected Improvements
 

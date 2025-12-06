@@ -3,7 +3,13 @@
 > **For Developers:** This document contains detailed technical implementation information. For quick start, see `README.md`.
 
 ## Overview
-This implementation adds **cargo demand prediction** and **intelligent cargo allocation optimization** to the existing cargo capacity forecasting system.
+This system provides **comprehensive cargo capacity forecasting** with **intelligent cargo allocation optimization** and **dynamic pricing recommendations**.
+
+### Core Components:
+1. **Ensemble ML Forecasting** - Predicts baggage, cargo demand, volume, and remaining capacity
+2. **Cargo Allocation Optimizer** - Optimizes cargo slot allocation using 4 strategies
+3. **Dynamic Pricing Engine** - Supply/demand-based pricing suggestions
+4. **Interactive Frontend** - Streamlit app with 3 pages (Forecast, Optimizer, Marketplace)
 
 ## New Features Implemented
 
@@ -165,24 +171,33 @@ python run_frontend.py
 ### Model Architecture
 ```
 Input Features (17):
-├── passenger_count
-├── temporal (year, month, day_of_week, etc.)
-├── scenario (group_travel_ratio, holiday_flag, etc.)
-├── aircraft (origin, destination, tail_number, type)
-└── pricing (fuel_price, cargo_price)
+├── passenger_count (primary driver for baggage)
+├── temporal (year, month, day_of_week, day_of_month, is_weekend)
+├── scenario (group_travel_ratio, holiday_flag, delay_probability, weather_index)
+├── aircraft (origin_encoded, destination_encoded, tail_number_encoded, aircraft_type_encoded)
+└── operational (fuel_weight_kg, fuel_price_per_kg, cargo_price_per_kg)
 
-Ensemble Models:
-├── LightGBM (40% weight typical)
-├── Random Forest (25%)
-├── Gradient Boosting (20%)
-├── XGBoost (10%)
-└── Ridge (5%)
+Ensemble Models (Trained Separately for Each Target):
+├── LightGBM (n_estimators=200, learning_rate=0.05, max_depth=7)
+├── Random Forest (n_estimators=200, max_depth=15)
+├── Gradient Boosting (n_estimators=200, learning_rate=0.05)
+├── XGBoost (optional, n_estimators=200, learning_rate=0.05)
+└── Ridge (alpha=1.0, linear baseline)
 
-Outputs:
-├── Baggage Weight + CI
-├── Cargo Demand + CI
-├── Cargo Volume + CI
-└── Remaining Capacity + CI
+Weighting: Inverse RMSE (better models get higher weights)
+
+Separate Ensembles For:
+1. Baggage Weight (function of passenger_count)
+2. Cargo Demand Weight (historical patterns)
+3. Cargo Volume (historical patterns)
+4. Remaining Capacity (constraint-based calculation)
+
+Outputs (All with 95% Confidence Intervals):
+├── Baggage Weight [lower, predicted, upper]
+├── Cargo Demand Weight [lower, predicted, upper]
+├── Cargo Volume [lower, predicted, upper]
+├── Remaining Capacity [lower, predicted, upper]
+└── Confidence Score (0-1, based on prediction variance)
 ```
 
 ### Optimization Complexity
@@ -192,12 +207,28 @@ Outputs:
 - **Runtime:** <1ms for 100 requests
 
 ### Capacity Constraints
+
+**Formula (Dual Constraint):**
+```python
+# Weight constraint
+remaining_weight = max_weight - baggage_weight - existing_cargo_weight
+
+# Volume constraint
+baggage_volume = baggage_weight / BAGGAGE_DENSITY  # 160 kg/m³
+remaining_volume = max_volume - baggage_volume - existing_cargo_volume
+remaining_volume_as_weight = remaining_volume * CARGO_DENSITY  # 200 kg/m³
+
+# Binding constraint (the limiting factor)
+remaining_cargo = min(remaining_weight, remaining_volume_as_weight)
+remaining_cargo = max(0, remaining_cargo)  # Ensure non-negative
 ```
-Remaining Cargo = min(
-    max_weight - baggage_weight - existing_cargo_weight,
-    (max_volume - baggage_volume - existing_cargo_volume) × cargo_density
-)
-```
+
+**Where:**
+- `max_weight` and `max_volume` are looked up from aircraft tail number
+- `BAGGAGE_DENSITY = 160 kg/m³` (average airline baggage)
+- `CARGO_DENSITY = 200 kg/m³` (average cargo)
+- Baggage is predicted as function of passenger_count
+- Both weight AND volume constraints are checked
 
 ## Key Improvements Over Previous Version
 

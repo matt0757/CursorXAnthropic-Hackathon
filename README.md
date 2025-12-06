@@ -35,19 +35,24 @@ A comprehensive solution for predicting cargo capacity, optimizing cargo allocat
 .
 ├── backend/
 │   ├── __init__.py
-│   ├── main.py              # FastAPI application
-│   ├── forecaster.py        # ML model loader and predictor
-│   ├── simulator.py         # What-If simulator logic
-│   ├── marketplace.py       # Marketplace slot generation
-│   └── train_model.py       # ML training script
+│   ├── main.py              # FastAPI application & API endpoints
+│   ├── forecaster.py        # ML ensemble model loader and predictor
+│   ├── optimizer.py         # Cargo allocation optimization algorithms
+│   ├── marketplace.py       # Marketplace slot generation & management
+│   └── train_model.py       # ML ensemble training script
 ├── frontend/
-│   └── streamlit_app.py     # Streamlit UI
+│   └── streamlit_app.py     # Streamlit UI (3 pages: Forecast, Optimizer, Marketplace)
 ├── models/
-│   └── forecaster.pkl       # Trained model (generated after training)
+│   └── forecaster.pkl       # Trained ensemble model (generated after training)
 ├── data/
-│   └── *.csv                # Dataset files
-├── requirements.txt
-└── README.md
+│   ├── *sample*.csv         # Flight data files (2023, 2024)
+│   └── *aircraft tail*.csv  # Aircraft capacity reference
+├── requirements.txt         # Python dependencies
+├── run_backend.py          # Backend launcher script
+├── run_frontend.py         # Frontend launcher script
+├── README.md               # This file
+├── TECHNICAL_DETAILS.md    # Implementation details
+└── ENSEMBLE_MODEL_INFO.md  # Model architecture documentation
 ```
 
 ## 🛠️ Quick Start (3 Steps)
@@ -93,68 +98,129 @@ Backend at: `http://localhost:8000` | API docs: `http://localhost:8000/docs`
 python run_frontend.py
 ```
 Opens automatically in your browser at `http://localhost:8501`
-## 🎯 How to Use New Features
 
-### Cargo Demand Forecasting
+## 🎯 How to Use
+
+### 1. Cargo Capacity Forecasting
 1. Go to **Forecast** page
-2. Enter flight parameters
-3. Click "Get Forecast"
-4. **NEW:** See "Predicted Cargo Demand" and "Predicted Cargo Volume"
+2. Enter flight parameters:
+   - Passenger count (required)
+   - Month, day of week, temporal features
+   - Optional: aircraft type, tail number, origin, destination
+   - Scenario parameters: group travel ratio, holiday flag, delay probability, weather index
+3. Click "🚀 Get Forecast"
+4. View predictions with 95% confidence intervals:
+   - **Predicted Baggage** (function of passenger count)
+   - **Predicted Cargo Demand** (future cargo bookings)
+   - **Predicted Cargo Volume** (future cargo volume)
+   - **Remaining Cargo Capacity** (what can be sold)
 
-### Cargo Allocation Optimizer
+### 2. Cargo Allocation Optimizer
 1. Go to **Cargo Optimizer** page
 2. Set available capacity (e.g., 1000kg, 10m³)
-3. Add cargo requests (weight, volume, priority, revenue, customer type)
-4. Select optimization strategy (Balanced recommended)
+3. Add cargo requests:
+   - Click "➕ Add Cargo Request"
+   - Enter: weight (kg), volume (m³), priority (1-5), revenue per kg ($), customer type
+   - Add multiple requests
+4. Select optimization strategy:
+   - **Balanced** (recommended): Multi-objective optimization
+   - **Revenue Max**: Maximize total profit
+   - **Utilization Max**: Fill all available space
+   - **Priority First**: VIP customers get priority
 5. Click "🚀 Run Optimization"
-6. View allocation results, revenue, and utilization
+6. View results:
+   - Total revenue and utilization percentages
+   - Allocated vs rejected requests
+   - Visual capacity utilization charts
 
-### Dynamic Pricing
-1. On **Cargo Optimizer** page → "💵 Pricing Suggestion"
+### 3. Dynamic Pricing
+1. On **Cargo Optimizer** page, scroll to "💵 Pricing Suggestion"
+2. Enter predicted demand and confidence level
+3. Get pricing recommendation based on supply/demand ratio
+
+### 4. Marketplace (Slot Generation)
+1. Go to **Marketplace** page
+2. Enter predicted remaining cargo capacity
+3. Set confidence level and slot size
+4. Click "🛒 Generate Slots"
+5. View available slots with risk scores and prices
+6. Reserve individual slots
 ## 🔌 API Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
+| `/` | GET | Root endpoint with available endpoints list |
 | `/health` | GET | Check API and model status |
-| `/predict` | POST | Predict cargo capacity (now includes cargo demand) |
-| `/simulate` | POST | Run what-if scenarios |
-| `/marketplace/generate-slots` | POST | Generate cargo slots |
-| `/marketplace/optimize` ⭐ | POST | **Optimize cargo allocation** |
-| `/marketplace/pricing-suggestion` ⭐ | POST | **Get dynamic pricing** |
-| `/marketplace/reserve/{slot_id}` | POST | Reserve a slot |
-| `/feature-importance` | GET | Get feature importance |
+| `/predict` | POST | Predict cargo capacity (includes baggage, cargo demand, volume, remaining capacity) |
+| `/marketplace/generate-slots` | POST | Generate cargo slots from predicted capacity |
+| `/marketplace/reserve/{slot_id}` | POST | Reserve a specific cargo slot |
+| `/marketplace/reservations/{slot_id}` | GET | Get reservation details |
+| `/marketplace/optimize` | POST | **Optimize cargo allocation with multiple strategies** |
+| `/marketplace/pricing-suggestion` | POST | **Get dynamic pricing based on supply/demand** |
+| `/feature-importance` | GET | Get top feature importance for explainability |
 
-**Explore API:** `http://localhost:8000/docs`
-  ```
+**Interactive API Documentation:** `http://localhost:8000/docs`
 
-### Marketplace
-- **POST** `/marketplace/generate-slots` - Generate cargo slots
-  ```json
-  {
-    "predicted_cargo": 500.0,
-    "confidence": 0.8,
-    "slot_size_kg": 20.0
-  }
-  ```
-
-- **POST** `/marketplace/reserve/{slot_id}` - Reserve a slot
-- **GET** `/marketplace/reservations/{slot_id}` - Get reservation details
-
-### Explainability
-- **GET** `/feature-importance` - Get top contributing features
-
-## 🎯 Usage Examples
-
-### Training a Model
-
-```bash
-python backend/train_model.py
-```
-
-### Making Predictions via API
-
+### Example API Request - Predict
 ```python
 import requests
+
+flight_data = {
+    "passenger_count": 150,
+    "year": 2024,
+    "month": 6,
+    "day_of_week": 2,
+    "day_of_month": 15,
+    "is_weekend": 0,
+    "group_travel_ratio": 0.2,
+    "holiday_flag": 0,
+    "delay_probability": 0.1,
+    "weather_index": 0.5,
+    "fuel_weight_kg": 50000,
+    "fuel_price_per_kg": 0.8,
+    "cargo_price_per_kg": 2.0,
+    "aircraft_type": "A330-300",  # optional
+    "tail_number": "9M-XXX",  # optional
+    "existing_cargo_weight_kg": 0.0,  # optional
+    "existing_cargo_volume_m3": 0.0  # optional
+}
+
+response = requests.post("http://localhost:8000/predict", json=flight_data)
+result = response.json()
+
+print(f"Predicted Baggage: {result['predicted_baggage']:.0f} kg")
+print(f"Predicted Cargo Demand: {result['predicted_cargo_demand']:.0f} kg")
+print(f"Remaining Capacity: {result['remaining_cargo']:.0f} kg")
+print(f"Confidence: {result['confidence']:.1%}")
+```
+
+### Example API Request - Optimize Allocation
+```python
+
+cargo_requests = [
+    {"request_id": "REQ001", "weight": 300, "volume": 1.5, "priority": 5, 
+     "revenue_per_kg": 3.0, "customer_type": "premium"},
+    {"request_id": "REQ002", "weight": 400, "volume": 2.0, "priority": 3, 
+     "revenue_per_kg": 2.0, "customer_type": "standard"},
+    {"request_id": "REQ003", "weight": 500, "volume": 2.5, "priority": 2, 
+     "revenue_per_kg": 1.5, "customer_type": "spot"}
+]
+
+response = requests.post(
+    "http://localhost:8000/marketplace/optimize",
+    json={
+        "available_weight": 1000.0,
+        "available_volume": 10.0,
+        "cargo_requests": cargo_requests,
+        "strategy": "balanced"  # or "revenue_max", "utilization_max", "priority_first"
+    }
+)
+
+result = response.json()
+print(f"Total Revenue: ${result['statistics']['total_revenue']:.2f}")
+print(f"Weight Utilization: {result['statistics']['weight_utilization']:.1%}")
+print(f"Allocated: {result['statistics']['allocated_count']} requests")
+```
 
 ## 🐛 Troubleshooting
 
@@ -163,7 +229,9 @@ import requests
 | "Model not found" | Run `python backend/train_model.py` first |
 | "API is not running" | Start backend: `python run_backend.py` |
 | "No module named..." | Install dependencies: `pip install -r requirements.txt` |
-| Import errors | Restart backend server |
+| Port already in use | Change port in run_backend.py or run_frontend.py |
+| Import errors | Restart backend server after making changes |
+| XGBoost warning | Optional - install with `pip install xgboost` for better performance |
 
 ## 📊 What's New vs Original?
 
