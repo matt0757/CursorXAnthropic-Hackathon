@@ -458,18 +458,18 @@ def show_optimizer_page():
                     # Statistics
                     stats = result['statistics']
                     
-                    col1, col2, col3, col4 = st.columns(4)
+                    stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
                     
-                    with col1:
+                    with stat_col1:
                         st.metric("Total Revenue", f"${stats['total_revenue']:.2f}")
                     
-                    with col2:
+                    with stat_col2:
                         st.metric("Weight Utilization", f"{stats['weight_utilization']:.1f}%")
                     
-                    with col3:
+                    with stat_col3:
                         st.metric("Volume Utilization", f"{stats['volume_utilization']:.1f}%")
                     
-                    with col4:
+                    with stat_col4:
                         st.metric("Allocated", f"{stats['allocated_count']}/{stats['allocated_count'] + stats['rejected_count']}")
                     
                     # Allocations
