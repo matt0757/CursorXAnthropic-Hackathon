@@ -108,6 +108,11 @@ class CargoForecaster:
         remaining_volume = max_volume - baggage_volume - existing_cargo_volume_m3
         
         # Convert remaining volume to equivalent weight
+        remaining_volume_as_weight = remaining_volume * self.CARGO_DENSITY
+        
+        # Return the binding constraint (minimum of weight and volume capacity)
+        return max(0, min(remaining_weight, remaining_volume_as_weight))
+    
     def _prepare_features(self, flight_data: Dict) -> np.ndarray:
         """Convert flight data dictionary to feature array."""
         # Create a DataFrame row from the input
@@ -176,6 +181,21 @@ class CargoForecaster:
             predictions.append(pred * weight)
         
         return np.sum(predictions)
+    
+    def _get_ensemble_std(self, X, ensemble_dict):
+        """Calculate standard deviation of predictions across ensemble models."""
+        predictions = []
+        models = ensemble_dict['models']
+        
+        for model_name, model in models.items():
+            pred = model.predict(X)[0]
+            predictions.append(pred)
+        
+        if len(predictions) > 1:
+            return np.std(predictions)
+        else:
+            # If only one model, estimate std as 10% of prediction
+            return np.mean(predictions) * 0.1 if predictions else 0.0
     
     def predict(self, flight_data: Dict, 
                 existing_cargo_weight_kg: float = 0.0, 

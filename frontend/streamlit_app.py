@@ -87,6 +87,11 @@ def show_forecast_page():
         is_weekend = 1 if day_of_week >= 5 else 0
         
         holiday_flag = st.selectbox("Holiday", options=[0, 1], format_func=lambda x: "No" if x == 0 else "Yes")
+        
+        # Route information
+        origin = st.text_input("Origin (optional)", placeholder="e.g., KUL", help="Airport code")
+        destination = st.text_input("Destination (optional)", placeholder="e.g., LHR", help="Airport code")
+
         group_travel_ratio = st.slider("Group Travel Ratio", 0.0, 1.0, 0.2)
         delay_probability = st.slider("Delay Probability", 0.0, 1.0, 0.1)
         weather_index = st.slider("Weather Index", 0.0, 1.0, 0.5)
@@ -97,6 +102,7 @@ def show_forecast_page():
         # Aircraft type and tail number
         aircraft_type = st.text_input("Aircraft Type (optional)", placeholder="e.g., A330-300", help="Leave blank to use defaults")
         tail_number = st.text_input("Tail Number (optional)", placeholder="e.g., 9M-XXX", help="Leave blank to use defaults")
+        
     if st.button("🚀 Get Forecast", type="primary"):
         flight_data = {
             "passenger_count": passenger_count,
@@ -108,10 +114,7 @@ def show_forecast_page():
             "group_travel_ratio": group_travel_ratio,
             "holiday_flag": holiday_flag,
             "delay_probability": delay_probability,
-            "weather_index": weather_index,
-            "fuel_weight_kg": fuel_weight,
-            "fuel_price_per_kg": fuel_price,
-            "cargo_price_per_kg": cargo_price
+            "weather_index": weather_index
         }
         
         # Add optional fields if provided
