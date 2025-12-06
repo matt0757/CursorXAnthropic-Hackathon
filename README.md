@@ -29,6 +29,14 @@ A comprehensive solution for predicting cargo capacity, optimizing cargo allocat
    - **Cargo Optimizer** ⭐ NEW: Optimize allocation with visualizations
    - **Marketplace**: Generate and reserve slots
 
+### 5. **Cargo TMS Dashboard** ⭐ NEW
+   - Professional Transportation Management System for airport cargo personnel
+   - **Home Dashboard**: Real-time overview of flights, cargo requests, and KPIs
+   - **Mesh Flights**: Network view with flight details, cargo status, and ULD management
+   - **Flight Services**: Service tracking with AI-powered capacity forecasting
+   - **Cargo Planning**: Booking management, optimization, and dynamic pricing
+   - **Analytics**: Performance metrics, route analysis, and reporting
+
 ## 📁 Project Structure
 
 ```
@@ -41,7 +49,8 @@ A comprehensive solution for predicting cargo capacity, optimizing cargo allocat
 │   ├── marketplace.py       # Marketplace slot generation & management
 │   └── train_model.py       # ML ensemble training script
 ├── frontend/
-│   └── streamlit_app.py     # Streamlit UI (3 pages: Forecast, Optimizer, Marketplace)
+│   ├── streamlit_app.py     # Streamlit UI (3 pages: Forecast, Optimizer, Marketplace)
+│   └── cargo_tms_app.py     # ⭐ NEW: TMS Dashboard for cargo personnel
 ├── models/
 │   └── forecaster.pkl       # Trained ensemble model (generated after training)
 ├── data/
@@ -50,6 +59,7 @@ A comprehensive solution for predicting cargo capacity, optimizing cargo allocat
 ├── requirements.txt         # Python dependencies
 ├── run_backend.py          # Backend launcher script
 ├── run_frontend.py         # Frontend launcher script
+├── run_tms.py              # ⭐ NEW: TMS Dashboard launcher
 ├── README.md               # This file
 ├── TECHNICAL_DETAILS.md    # Implementation details
 └── ENSEMBLE_MODEL_INFO.md  # Model architecture documentation
@@ -99,6 +109,12 @@ python run_frontend.py
 ```
 Opens automatically in your browser at `http://localhost:8501`
 
+**Terminal 3 - TMS Dashboard (Optional):**
+```powershell
+python run_tms.py
+```
+Opens the Cargo TMS Dashboard at `http://localhost:8502`
+
 ## 🎯 How to Use
 
 ### 1. Cargo Capacity Forecasting
@@ -145,6 +161,26 @@ Opens automatically in your browser at `http://localhost:8501`
 4. Click "🛒 Generate Slots"
 5. View available slots with risk scores and prices
 6. Reserve individual slots
+
+### 5. Cargo TMS Dashboard ⭐ NEW
+A professional Transportation Management System designed for airport cargo personnel.
+
+**Launch:** `python run_tms.py` (runs on port 8502)
+
+**Features:**
+- **🏠 Home**: Real-time dashboard with flight status, cargo requests, and daily KPIs
+- **📋 Mesh Flights**: Network overview with flight table, detailed flight info, ULD container tracking
+- **🔄 Flight Services**: Service status tracking, AI-powered cargo forecasting with confidence intervals
+- **📦 Cargo Planning**: Editable booking requests, optimization with 4 strategies, dynamic pricing
+- **📊 Analytics**: Utilization trends, revenue by customer, route performance metrics
+
+**Key Capabilities:**
+- View active flights with capacity utilization bars
+- Track pending cargo booking requests by priority
+- Run AI forecasting to predict baggage and remaining capacity
+- Optimize cargo allocation across multiple booking requests
+- Get dynamic pricing suggestions based on supply/demand
+- Analyze route and customer performance
 ## 🔌 API Endpoints
 
 | Endpoint | Method | Description |
@@ -279,7 +315,8 @@ Built for the CursorXAnthropic Hackathon MVP.
 │   ├── marketplace.py       # Marketplace + optimization integration
 │   └── train_model.py       # ML training (ensemble models)
 ├── frontend/
-│   └── streamlit_app.py     # UI (3 pages: Forecast, Cargo Optimizer, Marketplace)
+│   ├── streamlit_app.py     # UI (3 pages: Forecast, Cargo Optimizer, Marketplace)
+│   └── cargo_tms_app.py     # ⭐ TMS Dashboard for airport cargo personnel
 ├── models/
 │   └── forecaster.pkl       # Trained models (generated after training)
 ├── data/
