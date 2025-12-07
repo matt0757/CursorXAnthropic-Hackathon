@@ -333,7 +333,7 @@ def get_mock_cargo_requests():
     customers = ["Shopee Express", "DHL", "FedEx", "UPS", "Amazon Logistics", "Local Shipper"]
     cargo_types = ["General", "Express", "Perishable", "Dangerous Goods", "Valuables", "Live Animals"]
     
-    requests = []
+    cargo_reqs = []
     for i in range(random.randint(5, 12)):
         req = {
             "request_id": f"CRQ-{uuid.uuid4().hex[:6].upper()}",
@@ -346,9 +346,9 @@ def get_mock_cargo_requests():
             "status": random.choice(["Pending", "Accepted", "Loading"]),
             "deadline": (datetime.now() + timedelta(hours=random.randint(1, 8))).strftime("%H:%M"),
         }
-        requests.append(req)
+        cargo_reqs.append(req)
     
-    return requests
+    return cargo_reqs
 
 def get_mock_uld_containers():
     """Generate mock ULD container data."""
@@ -493,9 +493,9 @@ def show_home_dashboard(api_status):
     with col_right:
         st.markdown("### 📦 Pending Cargo Requests")
         
-        requests = get_mock_cargo_requests()[:5]
+        pending_reqs = get_mock_cargo_requests()[:5]
         
-        for req in requests:
+        for req in pending_reqs:
             with st.container():
                 rcol1, rcol2, rcol3 = st.columns([2, 2, 1])
                 
@@ -850,10 +850,10 @@ def show_cargo_planning(api_status):
             if 'tms_cargo_requests' not in st.session_state:
                 st.session_state['tms_cargo_requests'] = get_mock_cargo_requests()
             
-            requests = st.session_state['tms_cargo_requests']
+            cargo_reqs = st.session_state['tms_cargo_requests']
             
             # Display as editable table
-            df_requests = pd.DataFrame(requests)
+            df_requests = pd.DataFrame(cargo_reqs)
             
             edited_df = st.data_editor(
                 df_requests[['request_id', 'customer', 'cargo_type', 'weight', 'volume', 'priority', 'revenue_per_kg', 'status']],
