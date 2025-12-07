@@ -389,167 +389,26 @@ def get_mock_flights():
     return flights
 
 def get_mock_cargo_requests():
-    """Generate cargo requests that nearly fill available capacity per destination.
+    """Generate mock cargo booking requests."""
+    customers = ["Shopee Express", "DHL", "FedEx", "UPS", "Amazon Logistics", "Local Shipper"]
+    cargo_types = ["General", "Express", "Perishable", "Dangerous Goods", "Valuables", "Live Animals"]
     
-    This generates enough cargo to demonstrate the value of optimization:
-    - Total cargo per destination = 85-95% of combined flight capacity
-    - Mix of sizes ensures some flights would overflow without balancing
-    - Various priorities force zone allocation decisions
-    """
-    customers = ["Shopee Express", "Lazada Logistics", "DHL", "FedEx", "J&T Express", 
-                 "Pos Malaysia", "GD Express", "City-Link Express", "Ninja Van", "Kerry Express"]
-    cargo_types = ["General", "Express", "Perishable", "E-Commerce", "Pharmaceuticals", "Electronics"]
+    requests = []
+    for i in range(random.randint(5, 12)):
+        req = {
+            "request_id": f"CRQ-{uuid.uuid4().hex[:6].upper()}",
+            "customer": random.choice(customers),
+            "cargo_type": random.choice(cargo_types),
+            "weight": round(random.uniform(50, 500), 1),
+            "volume": round(random.uniform(0.5, 5), 2),
+            "priority": random.randint(1, 5),
+            "revenue_per_kg": round(random.uniform(1.5, 4.0), 2),
+            "status": random.choice(["Pending", "Accepted", "Loading"]),
+            "deadline": (datetime.now() + timedelta(hours=random.randint(1, 8))).strftime("%H:%M"),
+        }
+        requests.append(req)
     
-    # First, calculate capacity per destination from flights
-    flights = get_flights_for_cargo_gen()
-    
-    # Group outbound flights by destination and calculate available capacity
-    dest_capacity = {}
-    for flight in flights:
-        if flight['direction'] == 'outbound':
-            dest = flight['destination']
-            available = flight['max_weight'] - flight['baggage_estimate'] - (flight['max_weight'] * 0.15)  # 15% buffer
-            if dest not in dest_capacity:
-                dest_capacity[dest] = {
-                    'total_capacity': 0,
-                    'flight_count': 0,
-                    'name': flight['destination_name'],
-                    'avg_capacity_per_flight': 0
-                }
-            dest_capacity[dest]['total_capacity'] += available
-            dest_capacity[dest]['flight_count'] += 1
-    
-    # Calculate average capacity per flight for each destination
-    for dest in dest_capacity:
-        dest_capacity[dest]['avg_capacity_per_flight'] = (
-            dest_capacity[dest]['total_capacity'] / dest_capacity[dest]['flight_count']
-        )
-    
-    requests_list = []
-    cargo_id = 0
-    
-    # Generate cargo for each destination to fill 85-95% of capacity
-    for dest, info in dest_capacity.items():
-        target_fill = random.uniform(0.85, 0.95)  # 85-95% fill rate
-        target_weight = info['total_capacity'] * target_fill
-        current_weight = 0
-        
-        # Generate varied cargo sizes
-        # Mix of small, medium, and large shipments to create optimization challenge
-        while current_weight < target_weight:
-            remaining = target_weight - current_weight
-            
-            # Vary shipment sizes - some large ones that need careful placement
-            if remaining > 1500 and random.random() < 0.15:
-                # Large shipment (15% chance) - harder to fit
-                weight = round(random.uniform(800, min(1500, remaining)), 1)
-            elif remaining > 500 and random.random() < 0.3:
-                # Medium shipment (30% chance)
-                weight = round(random.uniform(300, min(800, remaining)), 1)
-            elif remaining > 100:
-                # Small shipment
-                weight = round(random.uniform(50, min(300, remaining)), 1)
-            else:
-                break  # Close enough to target
-            
-            # Volume roughly correlates with weight (density varies by cargo type)
-            cargo_type = random.choice(cargo_types)
-            density = {
-                "General": 180, "Express": 200, "Perishable": 150,
-                "E-Commerce": 220, "Pharmaceuticals": 250, "Electronics": 200
-            }[cargo_type]
-            volume = round(weight / density, 2)
-            
-            # Priority distribution: more high priority for Express/Pharma
-            if cargo_type in ["Express", "Pharmaceuticals"]:
-                priority = random.choices([3, 4, 5], weights=[30, 40, 30])[0]
-            elif cargo_type == "Perishable":
-                priority = random.choices([3, 4, 5], weights=[20, 50, 30])[0]
-            else:
-                priority = random.choices([1, 2, 3, 4, 5], weights=[15, 25, 35, 15, 10])[0]
-            
-            # Revenue varies by priority and cargo type
-            base_revenue = random.uniform(2.0, 3.5)
-            priority_multiplier = 1 + (priority - 1) * 0.15
-            type_multiplier = {"Pharmaceuticals": 1.3, "Express": 1.2, "Electronics": 1.15,
-                              "Perishable": 1.1, "E-Commerce": 1.0, "General": 0.9}[cargo_type]
-            revenue_per_kg = round(base_revenue * priority_multiplier * type_multiplier, 2)
-            
-            # Deadline based on priority
-            if priority >= 4:
-                deadline_hours = random.randint(2, 5)
-            elif priority >= 3:
-                deadline_hours = random.randint(4, 8)
-            else:
-                deadline_hours = random.randint(6, 12)
-            
-            req = {
-                "request_id": f"CRQ-{uuid.uuid4().hex[:6].upper()}",
-                "customer": random.choice(customers),
-                "cargo_type": cargo_type,
-                "weight": weight,
-                "volume": volume,
-                "priority": priority,
-                "revenue_per_kg": revenue_per_kg,
-                "status": "Pending",
-                "deadline": (datetime.now() + timedelta(hours=deadline_hours)).strftime("%H:%M"),
-                "destination": dest,
-                "destination_name": info['name'],
-                "assigned_flight": None,
-                "assigned_zone": None,
-            }
-            requests_list.append(req)
-            current_weight += weight
-            cargo_id += 1
-    
-    # Shuffle to mix destinations
-    random.shuffle(requests_list)
-    
-    return requests_list
-
-
-def get_flights_for_cargo_gen():
-    """Get flight structure for cargo generation without infinite recursion."""
-    aircraft_types = ["A330-300F", "B777F", "A350F", "B747-8F"]
-    
-    flights = []
-    base_time = datetime.now().replace(hour=6, minute=0, second=0, microsecond=0)
-    
-    routes = [
-        (DESTINATIONS[0], "outbound", 3),  # Singapore - 3 flights out
-        (DESTINATIONS[0], "inbound", 2),
-        (DESTINATIONS[1], "outbound", 2),  # Hong Kong - 2 flights out
-        (DESTINATIONS[1], "inbound", 2),
-        (DESTINATIONS[2], "outbound", 2),  # Bangkok - 2 flights out
-        (DESTINATIONS[2], "inbound", 1),
-        (DESTINATIONS[3], "outbound", 1),  # Manila - 1 flight out
-        (DESTINATIONS[4], "inbound", 1),
-    ]
-    
-    flight_idx = 0
-    for dest, direction, count in routes:
-        for i in range(count):
-            if direction == "outbound":
-                origin = KUL_HUB
-                destination = dest
-            else:
-                origin = dest
-                destination = KUL_HUB
-            
-            aircraft = random.choice(aircraft_types)
-            max_weight = {"A330-300F": 6000, "B777F": 8000, "A350F": 7000, "B747-8F": 10000}[aircraft]
-            
-            flight = {
-                "direction": direction,
-                "destination": destination[0],
-                "destination_name": destination[1],
-                "max_weight": max_weight,
-                "baggage_estimate": random.randint(1000, 2500),
-            }
-            flights.append(flight)
-            flight_idx += 1
-    
-    return flights
+    return requests
 
 def get_mock_uld_containers():
     """Generate mock ULD container data for KUL routes."""
@@ -787,9 +646,9 @@ def show_home_dashboard(api_status):
     with col_right:
         st.markdown("### 📦 Pending Cargo Requests")
         
-        requests = get_mock_cargo_requests()[:5]
+        pending_reqs = get_mock_cargo_requests()[:5]
         
-        for req in requests:
+        for req in pending_reqs:
             with st.container():
                 rcol1, rcol2, rcol3 = st.columns([2, 2, 1])
                 
@@ -1129,133 +988,132 @@ def show_cargo_planning(api_status):
     
     # Get all flights and cargo requests
     flights = get_mock_flights()
-    outbound_flights = [f for f in flights if f['direction'] == 'outbound']
+    selected = st.selectbox(
+        "Select Flight for Planning",
+        options=[f"{f['flight_number']} | {f['origin']}-{f['destination']}" for f in flights],
+        key="cargo_planning_flight"
+    )
     
-    # Initialize cargo requests in session state
-    if 'tms_cargo_requests' not in st.session_state:
-        st.session_state['tms_cargo_requests'] = get_mock_cargo_requests()
-    
-    cargo_requests = st.session_state['tms_cargo_requests']
-    
-    # Top section - Destination selector and available flights
-    st.markdown("#### 🎯 Select Destination for Optimization")
-    
-    # Get unique destinations with flight counts
-    dest_flight_counts = {}
-    for f in outbound_flights:
-        dest = f['destination']
-        if dest not in dest_flight_counts:
-            dest_flight_counts[dest] = {'count': 0, 'name': f['destination_name'], 'flights': []}
-        dest_flight_counts[dest]['count'] += 1
-        dest_flight_counts[dest]['flights'].append(f)
-    
-    dest_options = [f"{d} - {info['name']} ({info['count']} flights)" for d, info in dest_flight_counts.items()]
-    
-    dcol1, dcol2 = st.columns([2, 1])
-    with dcol1:
-        selected_dest = st.selectbox("Destination", dest_options, key="dest_selector")
-    with dcol2:
-        strategy = st.selectbox(
-            "Strategy",
-            options=["balanced", "earliest", "revenue_max"],
-            format_func=lambda x: {
-                "balanced": "⚖️ Load Balance",
-                "earliest": "⏰ Earliest Flight",
-                "revenue_max": "💰 Max Revenue"
-            }[x]
-        )
-    
-    if selected_dest:
-        dest_code = selected_dest.split(" - ")[0]
-        dest_flights = dest_flight_counts[dest_code]['flights']
-        dest_cargo = [c for c in cargo_requests if c['destination'] == dest_code and c['status'] == 'Pending']
+    if selected:
+        flight_idx = [f"{f['flight_number']} | {f['origin']}-{f['destination']}" for f in flights].index(selected)
+        flight = flights[flight_idx]
         
-        st.divider()
-        
-        # Calculate and show the optimization challenge
-        total_cargo_weight = sum(c['weight'] for c in dest_cargo)
-        total_capacity = sum(
-            f['max_weight'] - f['current_cargo_weight'] - f['baggage_estimate'] 
-            for f in dest_flights
-        )
-        fill_rate = (total_cargo_weight / total_capacity * 100) if total_capacity > 0 else 0
-        
-        # Warning banner showing the optimization challenge
-        if fill_rate > 80:
-            st.warning(f"⚠️ **High Load Alert**: {total_cargo_weight:,.0f} kg cargo for {total_capacity:,.0f} kg capacity ({fill_rate:.0f}% fill rate). Optimization critical!")
-        elif fill_rate > 60:
-            st.info(f"📊 **Load Status**: {total_cargo_weight:,.0f} kg cargo for {total_capacity:,.0f} kg capacity ({fill_rate:.0f}% fill rate)")
-        
-        # Show available flights for this destination
-        st.markdown(f"#### ✈️ Available Flights to {dest_flight_counts[dest_code]['name']}")
-        
-        flight_cols = st.columns(len(dest_flights))
-        for i, flight in enumerate(dest_flights):
-            with flight_cols[i]:
-                remaining_weight = flight['max_weight'] - flight['current_cargo_weight'] - flight['baggage_estimate']
-                utilization = (flight['current_cargo_weight'] + flight['baggage_estimate']) / flight['max_weight'] * 100
-                
-                st.markdown(f"**{flight['flight_number']}**")
-                st.caption(f"🕐 {flight['scheduled_departure']} | {flight['aircraft_type']}")
-                st.progress(min(utilization / 100, 1.0), text=f"{utilization:.0f}% loaded")
-                st.caption(f"Available: {remaining_weight:,.0f} kg")
-                
-                # Show status badge
-                status_colors = {"Scheduled": "🔵", "Loading": "🟡", "Ready": "🟢"}
-                st.markdown(f"{status_colors.get(flight['status'], '⚪')} {flight['status']}")
-        
-        st.divider()
-        
-        # Two column layout
         col_left, col_right = st.columns([3, 2])
         
         with col_left:
-            st.markdown(f"#### 📋 Pending Cargo to {dest_code} ({len(dest_cargo)} shipments)")
+            st.markdown("#### 📋 Cargo Booking Requests")
             
-            if dest_cargo:
-                df_cargo = pd.DataFrame(dest_cargo)
-                st.dataframe(
-                    df_cargo[['request_id', 'customer', 'cargo_type', 'weight', 'volume', 'priority', 'deadline']],
-                    use_container_width=True,
-                    column_config={
-                        "priority": st.column_config.NumberColumn("Priority", format="%d ⭐"),
-                        "weight": st.column_config.NumberColumn("Weight (kg)", format="%.1f"),
-                        "volume": st.column_config.NumberColumn("Volume (m³)", format="%.2f"),
-                    }
+            # Initialize cargo requests in session state
+            if 'tms_cargo_requests' not in st.session_state:
+                st.session_state['tms_cargo_requests'] = get_mock_cargo_requests()
+            
+            requests = st.session_state['tms_cargo_requests']
+            
+            # Display as editable table
+            df_requests = pd.DataFrame(requests)
+            
+            edited_df = st.data_editor(
+                df_requests[['request_id', 'customer', 'cargo_type', 'weight', 'volume', 'priority', 'revenue_per_kg', 'status']],
+                use_container_width=True,
+                num_rows="dynamic",
+                column_config={
+                    "priority": st.column_config.SelectboxColumn(
+                        "Priority",
+                        options=[1, 2, 3, 4, 5],
+                        required=True
+                    ),
+                    "status": st.column_config.SelectboxColumn(
+                        "Status",
+                        options=["Pending", "Accepted", "Rejected", "Loading"],
+                        required=True
+                    )
+                }
+            )
+            
+            # Optimization controls
+            st.markdown("#### 🎯 Optimization")
+            
+            ocol1, ocol2, ocol3 = st.columns(3)
+            
+            with ocol1:
+                available_weight = st.number_input(
+                    "Available Weight (kg)",
+                    value=float(flight['max_weight'] - flight['current_cargo_weight'] - flight['baggage_estimate']),
+                    min_value=0.0
                 )
-                
-                total_weight = sum(c['weight'] for c in dest_cargo)
-                total_volume = sum(c['volume'] for c in dest_cargo)
-                st.info(f"📊 Total pending: **{total_weight:,.1f} kg** | **{total_volume:.1f} m³**")
-            else:
-                st.info("No pending cargo for this destination")
             
-            # Run optimization button
-            if st.button("🚀 Optimize & Assign to Flights", type="primary", use_container_width=True):
-                if dest_cargo:
-                    # Calculate "without optimization" scenario (all cargo to first flight)
-                    first_flight = dest_flights[0]
-                    first_flight_capacity = first_flight['max_weight'] - first_flight['current_cargo_weight'] - first_flight['baggage_estimate']
-                    
-                    naive_overflow = max(0, total_cargo_weight - first_flight_capacity)
-                    naive_wasted = sum(
-                        f['max_weight'] - f['current_cargo_weight'] - f['baggage_estimate'] 
-                        for f in dest_flights[1:]
-                    ) if len(dest_flights) > 1 else 0
-                    
-                    st.session_state['naive_scenario'] = {
-                        'overflow': naive_overflow,
-                        'wasted_capacity': naive_wasted,
-                        'first_flight': first_flight['flight_number']
-                    }
-                    
-                    # Run the optimization
-                    allocations = optimize_cargo_across_flights(dest_cargo.copy(), dest_flights.copy(), strategy)
-                    st.session_state['multi_flight_allocations'] = allocations
-                    st.session_state['optimized_dest'] = dest_code
-                    st.success("✅ Optimization complete! See assignments below.")
+            with ocol2:
+                available_volume = st.number_input(
+                    "Available Volume (m³)",
+                    value=float(flight['max_volume'] - flight['current_cargo_volume']),
+                    min_value=0.0
+                )
+            
+            with ocol3:
+                strategy = st.selectbox(
+                    "Strategy",
+                    options=["balanced", "revenue_max", "utilization_max", "priority_first"],
+                    format_func=lambda x: {
+                        "balanced": "⚖️ Balanced",
+                        "revenue_max": "💰 Max Revenue",
+                        "utilization_max": "📦 Max Utilization",
+                        "priority_first": "⭐ Priority First"
+                    }[x]
+                )
+            
+            if st.button("🚀 Run Optimization", type="primary"):
+                if api_status:
+                    try:
+                        # Prepare cargo requests
+                        cargo_requests = []
+                        for _, row in edited_df.iterrows():
+                            if row['status'] == 'Pending':
+                                cargo_requests.append({
+                                    'request_id': row['request_id'],
+                                    'weight': float(row['weight']),
+                                    'volume': float(row['volume']),
+                                    'priority': int(row['priority']),
+                                    'revenue_per_kg': float(row['revenue_per_kg']),
+                                    'customer_type': 'standard'
+                                })
+                        
+                        response = requests.post(
+                            f"{API_BASE_URL}/marketplace/optimize",
+                            json={
+                                "available_weight": available_weight,
+                                "available_volume": available_volume,
+                                "cargo_requests": cargo_requests,
+                                "strategy": strategy
+                            }
+                        )
+                        
+                        if response.status_code == 200:
+                            st.session_state['optimization_result'] = response.json()
+                            st.success("✅ Optimization complete!")
+                        else:
+                            st.error(f"API Error: {response.text}")
+                    except Exception as e:
+                        st.error(f"Connection error: {str(e)}")
                 else:
-                    st.warning("No pending cargo to optimize")
+                    st.warning("API not connected. Running simulated optimization...")
+                    # Simulate optimization result
+                    st.session_state['optimization_result'] = {
+                        'allocations': [
+                            {'request_id': r['request_id'], 'allocated': random.choice([True, True, True, False]),
+                             'weight': r['weight'], 'volume': r['volume'], 'revenue': r['weight'] * r['revenue_per_kg']}
+                            for r in requests[:5]
+                        ],
+                        'statistics': {
+                            'total_revenue': sum(r['weight'] * r['revenue_per_kg'] for r in requests[:4]),
+                            'weight_utilization': 72.5,
+                            'volume_utilization': 65.3,
+                            'allocated_count': 4,
+                            'rejected_count': 1,
+                            'remaining_weight': available_weight * 0.275,
+                            'remaining_volume': available_volume * 0.347,
+                            'strategy': strategy
+                        }
+                    }
         
         with col_right:
             st.markdown("#### 🗺️ Cargo Zone Guide")
