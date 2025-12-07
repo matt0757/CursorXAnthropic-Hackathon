@@ -1,6 +1,6 @@
 """
-Cargo TMS (Transportation Management System) Dashboard
-For Airport Cargo Personnel
+PISSTMS - Passenger Integrated Smart Scheduling TMS
+Transportation Management System Dashboard for Airport Cargo Personnel
 """
 import streamlit as st
 import requests
@@ -17,11 +17,136 @@ API_BASE_URL = "http://localhost:8000"
 
 # Page config
 st.set_page_config(
-    page_title="AirCargo TMS",
+    page_title="PISSTMS",
     page_icon="✈️",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"
 )
+
+# ============= Authentication =============
+
+def init_session_state():
+    """Initialize session state variables."""
+    if 'logged_in' not in st.session_state:
+        st.session_state.logged_in = False
+    if 'username' not in st.session_state:
+        st.session_state.username = ""
+    if 'current_page' not in st.session_state:
+        st.session_state.current_page = "🏠 Home"
+
+def login(username: str, password: str) -> bool:
+    """Validate login credentials."""
+    # Demo credentials
+    if username == "demo" and password == "demo":
+        st.session_state.logged_in = True
+        st.session_state.username = username
+        return True
+    return False
+
+def logout():
+    """Log out the user."""
+    st.session_state.logged_in = False
+    st.session_state.username = ""
+    st.session_state.current_page = "🏠 Home"
+
+def show_login_page():
+    """Display the login page."""
+    st.markdown("""
+    <style>
+        .login-container {
+            max-width: 400px;
+            margin: 100px auto;
+            padding: 2rem;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col2:
+        st.markdown("## ✈️ PISSTMS")
+        st.markdown("### Login")
+        st.markdown("---")
+        
+        # Auto-fill with demo credentials
+        username = st.text_input("Username", value="demo", key="login_username")
+        password = st.text_input("Password", value="demo", type="password", key="login_password")
+        
+        st.caption("💡 Demo credentials: **demo** / **demo**")
+        
+        col_btn1, col_btn2 = st.columns(2)
+        
+        with col_btn1:
+            if st.button("🔐 Login", type="primary", use_container_width=True):
+                if login(username, password):
+                    st.success("✅ Login successful!")
+                    time.sleep(0.5)
+                    st.rerun()
+                else:
+                    st.error("❌ Invalid credentials")
+        
+        with col_btn2:
+            if st.button("🚀 Demo Login", use_container_width=True):
+                if login("demo", "demo"):
+                    st.success("✅ Demo login successful!")
+                    time.sleep(0.5)
+                    st.rerun()
+
+def show_sidebar():
+    """Display the sidebar navigation."""
+    with st.sidebar:
+        # Logo and branding
+        st.markdown("## ✈️ PISSTMS")
+        st.markdown("---")
+        
+        # User info
+        st.markdown(f"👤 **{st.session_state.username}**")
+        st.caption(f"🕐 {datetime.now().strftime('%H:%M')} | {datetime.now().strftime('%d %b %Y')}")
+        
+        st.markdown("---")
+        
+        # Navigation menu
+        st.markdown("### Navigation")
+        
+        menu_items = [
+            "🏠 Home",
+            "📋 Mesh Flights",
+            "🔄 Flight Services",
+            "📦 Cargo Planning",
+            "📊 Analytics"
+        ]
+        
+        for item in menu_items:
+            if st.button(item, use_container_width=True, 
+                        type="primary" if st.session_state.current_page == item else "secondary"):
+                st.session_state.current_page = item
+                st.rerun()
+        
+        st.markdown("---")
+        
+        # API Status
+        api_status = check_api_health()
+        if api_status:
+            st.success("🟢 API Connected")
+        else:
+            st.warning("🟡 API Offline")
+        
+        st.markdown("---")
+        
+        # Logout button
+        if st.button("🚪 Logout", use_container_width=True):
+            logout()
+            st.rerun()
+        
+        # Footer
+        st.markdown("---")
+        st.caption("© 2024 PISSTMS")
+        st.caption("🇲🇾 KUL Hub Operations")
+    
+    return api_status
 
 # Custom CSS for professional TMS look
 st.markdown("""
@@ -181,30 +306,38 @@ st.markdown("""
         border-bottom: 1px solid #e9ecef;
     }
     
-    /* Tabs styling */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 0;
-        background: #1a1a2e;
-        border-radius: 10px;
-        padding: 0.25rem;
+    /* Sidebar styling */
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
     }
     
-    .stTabs [data-baseweb="tab"] {
-        border-radius: 8px;
-        padding: 0.5rem 1.5rem;
-        font-weight: 500;
-        color: #e0e0e0 !important;
-        background: transparent !important;
+    [data-testid="stSidebar"] [data-testid="stMarkdown"] {
+        color: #e0e0e0;
     }
     
-    .stTabs [data-baseweb="tab"]:hover {
+    [data-testid="stSidebar"] h2 {
+        color: #4CAF50 !important;
+    }
+    
+    [data-testid="stSidebar"] h3 {
         color: #ffffff !important;
-        background: rgba(76, 175, 80, 0.3) !important;
     }
     
-    .stTabs [aria-selected="true"] {
-        background: #4CAF50 !important;
-        color: white !important;
+    [data-testid="stSidebar"] .stButton > button {
+        background: transparent;
+        border: 1px solid #4CAF50;
+        color: #e0e0e0;
+    }
+    
+    [data-testid="stSidebar"] .stButton > button:hover {
+        background: rgba(76, 175, 80, 0.3);
+        color: white;
+    }
+    
+    [data-testid="stSidebar"] .stButton > button[kind="primary"] {
+        background: #4CAF50;
+        color: white;
+        border: none;
     }
     
     /* Button styling */
@@ -527,36 +660,29 @@ def optimize_cargo_across_flights(cargo_requests, flights, strategy="balanced"):
 def main():
     """Main application entry point."""
     
-    # Header
-    col_header1, col_header2, col_header3 = st.columns([2, 6, 2])
+    # Initialize session state
+    init_session_state()
     
-    with col_header1:
-        st.markdown("### ✈️ **AirCargo TMS**")
+    # Check if logged in
+    if not st.session_state.logged_in:
+        show_login_page()
+        return
     
-    with col_header2:
-        # Navigation tabs in header
-        tabs = st.tabs(["🏠 Home", "📋 Mesh Flights", "🔄 Flight Services", "📦 Cargo Planning", "📊 Analytics"])
+    # Show sidebar and get API status
+    api_status = show_sidebar()
     
-    with col_header3:
-        st.markdown(f"**{datetime.now().strftime('%H:%M')}** | {datetime.now().strftime('%d %b %Y')}")
+    # Page content based on current page
+    current_page = st.session_state.current_page
     
-    # Check API Status
-    api_status = check_api_health()
-    
-    # Tab content
-    with tabs[0]:
+    if current_page == "🏠 Home":
         show_home_dashboard(api_status)
-    
-    with tabs[1]:
+    elif current_page == "📋 Mesh Flights":
         show_mesh_flights()
-    
-    with tabs[2]:
+    elif current_page == "🔄 Flight Services":
         show_flight_services(api_status)
-    
-    with tabs[3]:
+    elif current_page == "📦 Cargo Planning":
         show_cargo_planning(api_status)
-    
-    with tabs[4]:
+    elif current_page == "📊 Analytics":
         show_analytics(api_status)
 
 
@@ -982,35 +1108,72 @@ def show_flight_services(api_status):
 
 
 def show_cargo_planning(api_status):
-    """Cargo planning and optimization across multiple flights."""
+    """Cargo planning and optimization across multiple flights to same destination."""
     st.markdown("### 📦 Multi-Flight Cargo Planning & Zone Assignment")
-    st.caption("🇲🇾 Optimize cargo across all KUL outbound flights with automatic zone allocation")
+    st.caption("🇲🇾 Optimize cargo across all KUL outbound flights to the same destination")
     
-    # Get all flights and cargo requests
+    # Get all flights
     flights = get_mock_flights()
-    selected = st.selectbox(
-        "Select Flight for Planning",
-        options=[f"{f['flight_number']} | {f['origin']}-{f['destination']}" for f in flights],
-        key="cargo_planning_flight"
+    
+    # Group outbound flights by destination
+    outbound_flights = [f for f in flights if f['direction'] == 'outbound']
+    destinations = {}
+    for f in outbound_flights:
+        dest = f['destination']
+        dest_name = f['destination_name']
+        if dest not in destinations:
+            destinations[dest] = {'name': dest_name, 'flights': []}
+        destinations[dest]['flights'].append(f)
+    
+    # Destination selector
+    dest_options = [f"{code} - {info['name']} ({len(info['flights'])} flights)" 
+                    for code, info in destinations.items()]
+    
+    selected_dest = st.selectbox(
+        "🎯 Select Destination (to see all flights)",
+        options=dest_options,
+        key="cargo_planning_dest"
     )
     
-    if selected:
-        flight_idx = [f"{f['flight_number']} | {f['origin']}-{f['destination']}" for f in flights].index(selected)
-        flight = flights[flight_idx]
+    if selected_dest:
+        dest_code = selected_dest.split(" - ")[0]
+        dest_flights = destinations[dest_code]['flights']
+        
+        # Show flights to this destination
+        st.markdown(f"#### ✈️ Flights to {dest_code} ({len(dest_flights)} available)")
+        
+        flight_cols = st.columns(len(dest_flights))
+        for i, flight in enumerate(dest_flights):
+            with flight_cols[i]:
+                weight_pct = (flight['current_cargo_weight'] + flight['baggage_estimate']) / flight['max_weight'] * 100
+                remaining = flight['max_weight'] - flight['current_cargo_weight'] - flight['baggage_estimate']
+                
+                st.markdown(f"**{flight['flight_number']}**")
+                st.caption(f"🕐 {flight['scheduled_departure']}")
+                st.caption(f"✈️ {flight['aircraft_type']}")
+                st.progress(min(weight_pct / 100, 1.0))
+                st.caption(f"📦 {remaining:,.0f} kg available")
+        
+        st.divider()
         
         col_left, col_right = st.columns([3, 2])
         
         with col_left:
             st.markdown("#### 📋 Cargo Booking Requests")
             
-            # Initialize cargo requests in session state
-            if 'tms_cargo_requests' not in st.session_state:
-                st.session_state['tms_cargo_requests'] = get_mock_cargo_requests()
+            # Initialize cargo requests with destination in session state
+            if 'tms_cargo_requests' not in st.session_state or st.session_state.get('cargo_dest') != dest_code:
+                cargo_reqs = get_mock_cargo_requests()
+                # Add destination to each cargo request
+                for req in cargo_reqs:
+                    req['destination'] = dest_code
+                st.session_state['tms_cargo_requests'] = cargo_reqs
+                st.session_state['cargo_dest'] = dest_code
             
-            requests = st.session_state['tms_cargo_requests']
+            cargo_requests = st.session_state['tms_cargo_requests']
             
             # Display as editable table
-            df_requests = pd.DataFrame(requests)
+            df_requests = pd.DataFrame(cargo_requests)
             
             edited_df = st.data_editor(
                 df_requests[['request_id', 'customer', 'cargo_type', 'weight', 'volume', 'priority', 'revenue_per_kg', 'status']],
@@ -1031,89 +1194,78 @@ def show_cargo_planning(api_status):
             )
             
             # Optimization controls
-            st.markdown("#### 🎯 Optimization")
+            st.markdown("#### 🎯 Multi-Flight Optimization")
             
-            ocol1, ocol2, ocol3 = st.columns(3)
+            ocol1, ocol2 = st.columns(2)
             
             with ocol1:
-                available_weight = st.number_input(
-                    "Available Weight (kg)",
-                    value=float(flight['max_weight'] - flight['current_cargo_weight'] - flight['baggage_estimate']),
-                    min_value=0.0
-                )
-            
-            with ocol2:
-                available_volume = st.number_input(
-                    "Available Volume (m³)",
-                    value=float(flight['max_volume'] - flight['current_cargo_volume']),
-                    min_value=0.0
-                )
-            
-            with ocol3:
                 strategy = st.selectbox(
-                    "Strategy",
-                    options=["balanced", "revenue_max", "utilization_max", "priority_first"],
+                    "Optimization Strategy",
+                    options=["balanced", "earliest", "revenue_max", "priority_first"],
                     format_func=lambda x: {
-                        "balanced": "⚖️ Balanced",
+                        "balanced": "⚖️ Balanced (spread load evenly)",
+                        "earliest": "⏰ Earliest Flight First",
                         "revenue_max": "💰 Max Revenue",
-                        "utilization_max": "📦 Max Utilization",
                         "priority_first": "⭐ Priority First"
                     }[x]
                 )
             
-            if st.button("🚀 Run Optimization", type="primary"):
-                if api_status:
-                    try:
-                        # Prepare cargo requests
-                        cargo_requests = []
-                        for _, row in edited_df.iterrows():
-                            if row['status'] == 'Pending':
-                                cargo_requests.append({
-                                    'request_id': row['request_id'],
-                                    'weight': float(row['weight']),
-                                    'volume': float(row['volume']),
-                                    'priority': int(row['priority']),
-                                    'revenue_per_kg': float(row['revenue_per_kg']),
-                                    'customer_type': 'standard'
-                                })
-                        
-                        response = requests.post(
-                            f"{API_BASE_URL}/marketplace/optimize",
-                            json={
-                                "available_weight": available_weight,
-                                "available_volume": available_volume,
-                                "cargo_requests": cargo_requests,
-                                "strategy": strategy
-                            }
-                        )
-                        
-                        if response.status_code == 200:
-                            st.session_state['optimization_result'] = response.json()
-                            st.success("✅ Optimization complete!")
-                        else:
-                            st.error(f"API Error: {response.text}")
-                    except Exception as e:
-                        st.error(f"Connection error: {str(e)}")
-                else:
-                    st.warning("API not connected. Running simulated optimization...")
-                    # Simulate optimization result
-                    st.session_state['optimization_result'] = {
-                        'allocations': [
-                            {'request_id': r['request_id'], 'allocated': random.choice([True, True, True, False]),
-                             'weight': r['weight'], 'volume': r['volume'], 'revenue': r['weight'] * r['revenue_per_kg']}
-                            for r in requests[:5]
-                        ],
-                        'statistics': {
-                            'total_revenue': sum(r['weight'] * r['revenue_per_kg'] for r in requests[:4]),
-                            'weight_utilization': 72.5,
-                            'volume_utilization': 65.3,
-                            'allocated_count': 4,
-                            'rejected_count': 1,
-                            'remaining_weight': available_weight * 0.275,
-                            'remaining_volume': available_volume * 0.347,
-                            'strategy': strategy
-                        }
-                    }
+            with ocol2:
+                # Calculate total available capacity across all flights
+                total_available = sum(
+                    f['max_weight'] - f['current_cargo_weight'] - f['baggage_estimate']
+                    for f in dest_flights
+                )
+                st.metric("Total Available Capacity", f"{total_available:,.0f} kg", 
+                         delta=f"Across {len(dest_flights)} flights")
+            
+            if st.button("🚀 Optimize Across All Flights", type="primary"):
+                # Prepare cargo requests with destination
+                pending_cargo = []
+                for _, row in edited_df.iterrows():
+                    if row['status'] == 'Pending':
+                        pending_cargo.append({
+                            'request_id': row['request_id'],
+                            'customer': row['customer'],
+                            'cargo_type': row['cargo_type'],
+                            'weight': float(row['weight']),
+                            'volume': float(row['volume']),
+                            'priority': int(row['priority']),
+                            'revenue_per_kg': float(row['revenue_per_kg']),
+                            'status': 'Pending',
+                            'destination': dest_code
+                        })
+                
+                # Calculate naive scenario (all cargo to first flight only)
+                first_flight = dest_flights[0]
+                first_flight_capacity = first_flight['max_weight'] - first_flight['current_cargo_weight'] - first_flight['baggage_estimate']
+                total_cargo_weight = sum(c['weight'] for c in pending_cargo)
+                
+                naive_overflow = max(0, total_cargo_weight - first_flight_capacity)
+                naive_wasted = sum(
+                    f['max_weight'] - f['current_cargo_weight'] - f['baggage_estimate']
+                    for f in dest_flights[1:]
+                )
+                
+                st.session_state['naive_scenario'] = {
+                    'first_flight': first_flight['flight_number'],
+                    'first_capacity': first_flight_capacity,
+                    'total_cargo': total_cargo_weight,
+                    'overflow': naive_overflow,
+                    'wasted_capacity': naive_wasted
+                }
+                
+                # Run multi-flight optimization
+                # Create a copy of flights to avoid modifying the originals
+                import copy
+                flights_copy = copy.deepcopy(dest_flights)
+                
+                allocations = optimize_cargo_across_flights(pending_cargo, flights_copy, strategy)
+                
+                st.session_state['multi_flight_allocations'] = allocations
+                st.session_state['optimized_dest'] = dest_code
+                st.success("✅ Multi-flight optimization complete!")
+                st.rerun()
         
         with col_right:
             st.markdown("#### 🗺️ Cargo Zone Guide")
@@ -1128,53 +1280,80 @@ def show_cargo_planning(api_status):
             st.caption("🟠 Heavy cargo (>500kg) → **MAIN/AFT**")
             st.caption("🟡 Perishables → **AFT** (Temperature)")
             st.caption("🟢 General cargo → **AFT/BULK**")
+            
+            st.markdown("---")
+            st.markdown("#### 💡 Why Multi-Flight?")
+            st.caption("Without optimization, all cargo goes to the first available flight, causing:")
+            st.caption("❌ Overflow & rejected cargo")
+            st.caption("❌ Wasted capacity on later flights")
+            st.caption("✅ Optimization distributes load across all flights!")
         
         # Show optimization results
         if 'multi_flight_allocations' in st.session_state and st.session_state.get('optimized_dest') == dest_code:
             st.divider()
             
-            # Show Before vs After comparison
+            allocations = st.session_state['multi_flight_allocations']
+            allocated = [a for a in allocations if a.get('allocated')]
+            not_allocated = [a for a in allocations if not a.get('allocated')]
+            
+            total_allocated = sum(a['weight'] for a in allocated)
+            total_rejected = sum(a['weight'] for a in not_allocated)
+            
+            # Show Before vs After comparison only if there's meaningful data
             if 'naive_scenario' in st.session_state:
                 naive = st.session_state['naive_scenario']
                 
-                st.markdown("### 📊 Optimization Impact")
+                st.markdown("### 📊 Optimization Results")
                 
-                comp_col1, comp_col2 = st.columns(2)
-                
-                with comp_col1:
-                    st.markdown("#### ❌ Without Optimization")
-                    st.markdown(f"*All cargo sent to {naive['first_flight']} only*")
+                # Only show comparison if there would have been overflow without optimization
+                if naive['overflow'] > 0:
+                    st.markdown("#### 🔄 Before vs After Optimization")
                     
-                    if naive['overflow'] > 0:
-                        st.error(f"🚫 **{naive['overflow']:,.0f} kg** cargo REJECTED (overflow)")
-                    else:
-                        st.success("✅ No overflow")
+                    comp_col1, comp_col2 = st.columns(2)
                     
-                    if naive['wasted_capacity'] > 0:
-                        st.warning(f"💨 **{naive['wasted_capacity']:,.0f} kg** capacity WASTED on other flights")
-                
-                with comp_col2:
-                    allocations = st.session_state['multi_flight_allocations']
-                    allocated = [a for a in allocations if a.get('allocated')]
-                    not_allocated = [a for a in allocations if not a.get('allocated')]
+                    with comp_col1:
+                        st.markdown("**❌ Single Flight Approach**")
+                        st.markdown(f"*All {naive['total_cargo']:,.0f} kg → {naive['first_flight']}*")
+                        st.error(f"🚫 **{naive['overflow']:,.0f} kg** REJECTED (overflow)")
+                        st.caption(f"First flight capacity: {naive['first_capacity']:,.0f} kg")
+                        st.warning(f"💨 **{naive['wasted_capacity']:,.0f} kg** unused on other flights")
                     
-                    st.markdown("#### ✅ With Optimization")
-                    st.markdown(f"*Cargo distributed across {len(dest_flights)} flights*")
-                    
-                    total_allocated = sum(a['weight'] for a in allocated)
-                    total_rejected = sum(a['weight'] for a in not_allocated)
-                    
-                    if total_rejected > 0:
-                        st.warning(f"⚠️ **{total_rejected:,.0f} kg** cargo rejected (true overflow)")
-                    else:
-                        st.success(f"✅ **ALL {total_allocated:,.0f} kg** cargo allocated!")
-                    
-                    # Calculate improvement
-                    if naive['overflow'] > 0 and total_rejected < naive['overflow']:
+                    with comp_col2:
+                        st.markdown("**✅ Multi-Flight Optimization**")
+                        flights_used = len(set(a['assigned_flight'] for a in allocated))
+                        st.markdown(f"*Distributed across {flights_used} flight(s)*")
+                        
+                        if total_rejected > 0:
+                            st.warning(f"⚠️ **{total_rejected:,.0f} kg** rejected (all flights full)")
+                        else:
+                            st.success(f"✅ **ALL {total_allocated:,.0f} kg** allocated!")
+                        
+                        # Calculate improvement
                         improvement = naive['overflow'] - total_rejected
-                        st.success(f"📈 **{improvement:,.0f} kg MORE** cargo accommodated!")
-                
-                st.divider()
+                        if improvement > 0:
+                            st.success(f"📈 **{improvement:,.0f} kg MORE** cargo accommodated!")
+                    
+                    st.divider()
+                else:
+                    # No overflow - simple summary
+                    st.markdown("#### ✅ Allocation Summary")
+                    
+                    summary_col1, summary_col2, summary_col3 = st.columns(3)
+                    
+                    with summary_col1:
+                        st.metric("Total Cargo", f"{naive['total_cargo']:,.0f} kg")
+                    
+                    with summary_col2:
+                        flights_used = len(set(a['assigned_flight'] for a in allocated)) if allocated else 0
+                        st.metric("Flights Used", f"{flights_used}")
+                    
+                    with summary_col3:
+                        st.metric("Status", "✅ All Allocated" if total_rejected == 0 else f"⚠️ {total_rejected:.0f} kg rejected")
+                    
+                    if total_rejected == 0:
+                        st.success(f"✅ All **{len(allocated)} shipments** ({total_allocated:,.0f} kg) successfully allocated!")
+                    
+                    st.divider()
             
             st.markdown("### 📋 Flight & Zone Assignments")
             
